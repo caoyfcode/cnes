@@ -2,6 +2,7 @@
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
 pub struct CPU {
     pub register_a: u8,
+    pub register_x: u8,
     pub status: u8,
     pub program_counter: u16,
 }
@@ -10,6 +11,7 @@ impl CPU {
     pub fn new() -> Self {
         CPU {
             register_a: 0,
+            register_x: 0,
             status: 0,
             program_counter: 0,
         }
@@ -26,25 +28,43 @@ impl CPU {
                 0xA9 => { // Immediate, LDA #$44, 2, 2, NZ
                     let param = program[self.program_counter as usize];
                     self.program_counter += 1;
-                    self.register_a = param;
 
-                    if self.register_a == 0 { // Z
-                        self.status = self.status | 0b0000_0010;
-                    } else {
-                        self.status = self.status & 0b1111_1101;
-                    }
-
-                    if self.register_a & 0b1000_0000 != 0 { // N
-                        self.status = self.status | 0b1000_0000;
-                    } else {
-                        self.status = self.status & 0b0111_1111;
-                    }
+                    self.lda(param);
+                }
+                0xAA => { // Implied, TAX, 1, 2, NZ
+                    self.tax();
                 }
                 0x00 => { // Implied, BRK, 1, 7
                     return;  // just end
                 }
                 _ => todo!()
             }
+        }
+    }
+
+    fn lda(&mut self, value: u8) {
+        self.register_a = value;
+
+        self.update_flag_nz(self.register_a);
+    }
+
+    fn tax(&mut self) {
+        self.register_x = self.register_a;
+
+        self.update_flag_nz(self.register_x);
+    }
+
+    fn update_flag_nz(&mut self, result: u8) {
+        if result == 0 { // Z
+            self.status = self.status | 0b0000_0010;
+        } else {
+            self.status = self.status & 0b1111_1101;
+        }
+
+        if result & 0b1000_0000 != 0 { // N
+            self.status = self.status | 0b1000_0000;
+        } else {
+            self.status = self.status & 0b0111_1111;
         }
     }
 }
@@ -77,5 +97,14 @@ mod tests {
         cpu.interpret(vec![0xa9, 0xff, 0x00]); // LDA #$FF; BRK
         assert_eq!(cpu.register_a, 0xff);
         assert!(cpu.status & 0b1000_0000 == 0b1000_0000); // N is 1
+    }
+
+    #[test]
+    fn test_0xaa_tax_move_a_to_x() {
+        let mut cpu = CPU::new();
+        cpu.register_a = 10;
+        cpu.interpret(vec![0xaa, 0x00]); // TAX; BRK
+
+        assert_eq!(cpu.register_x, 10)
     }
 }
