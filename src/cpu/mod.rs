@@ -34,6 +34,9 @@ impl CPU {
                 0xAA => { // Implied, TAX, 1, 2, NZ
                     self.tax();
                 }
+                0xE8 => { // Implied, INX, 1, 2, NZ
+                    self.inx();
+                }
                 0x00 => { // Implied, BRK, 1, 7
                     return;  // just end
                 }
@@ -50,6 +53,12 @@ impl CPU {
 
     fn tax(&mut self) {
         self.register_x = self.register_a;
+
+        self.update_flag_nz(self.register_x);
+    }
+
+    fn inx(&mut self) {
+        (self.register_x, _ ) =self.register_x.overflowing_add(1);
 
         self.update_flag_nz(self.register_x);
     }
@@ -106,5 +115,22 @@ mod tests {
         cpu.interpret(vec![0xaa, 0x00]); // TAX; BRK
 
         assert_eq!(cpu.register_x, 10)
+    }
+
+    #[test]
+    fn test_5_ops_working_together() {
+        let mut cpu = CPU::new();
+        cpu.interpret(vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]); // LDA #$c0; TAX; INX; BRK
+
+        assert_eq!(cpu.register_x, 0xc1)
+    }
+
+    #[test]
+    fn test_inx_overflow() {
+        let mut cpu = CPU::new();
+        cpu.register_x = 0xff;
+        cpu.interpret(vec![0xe8, 0xe8, 0x00]); // INX; INX; BRK
+
+        assert_eq!(cpu.register_x, 1)
     }
 }
