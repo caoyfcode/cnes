@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use crate::opcodes;
 
 /// # 寻址模式
 /// 6502 有 15 种寻址模式, 仅仅实现存储器的寻址, 且如果不是对该地址进行一般的读写也不实现
@@ -104,26 +107,37 @@ impl CPU {
     }
 
     pub fn run(&mut self) {
-        loop {
-            let opcode = self.mem_read(self.program_counter);
-            self.program_counter += 1;
+        let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
-            match opcode {
+        loop {
+            let code = self.mem_read(self.program_counter);
+            self.program_counter += 1;
+            let program_counter_state = self.program_counter;
+
+            let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
+
+            match code {
                 // mode, syntax, len, time, flags
-                0xA9 => { // Immediate, LDA #$44, 2, 2, NZ
-                    self.lda(&AddressingMode::Immediate);
-                    self.program_counter += 1;
+                0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
+                    self.lda(&opcode.mode);
                 }
-                0xAA => { // Implied, TAX, 1, 2, NZ
+                0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
+                    self.sta(&&opcode.mode);
+                }
+                0xAA => {
                     self.tax();
                 }
-                0xE8 => { // Implied, INX, 1, 2, NZ
+                0xE8 => {
                     self.inx();
                 }
-                0x00 => { // Implied, BRK, 1, 7
+                0x00 => { // BRK
                     return;  // just end
                 }
                 _ => todo!()
+            }
+
+            if program_counter_state == self.program_counter { // 分支跳转可能改变 PC
+                self.program_counter += (opcode.len - 1) as u16;
             }
         }
     }
@@ -171,6 +185,11 @@ impl CPU {
         self.register_a = value;
 
         self.update_flag_nz(self.register_a);
+    }
+
+    fn sta(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_a);
     }
 
     fn tax(&mut self) {
@@ -239,6 +258,16 @@ mod tests {
         cpu.run();
 
         assert_eq!(cpu.register_x, 10)
+    }
+
+    #[test]
+    fn test_lda_from_memory() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x55);
+
+        cpu.load_and_run(vec![0xa5, 0x10, 0x00]); // LDA $10; BRK
+
+        assert_eq!(cpu.register_a, 0x55);
     }
 
     #[test]
