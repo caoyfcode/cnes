@@ -1,8 +1,43 @@
+
+/// # 寻址模式
+/// 6502 有 15 种寻址模式, 仅仅实现存储器的寻址, 且如果不是对该地址进行一般的读写也不实现
+/// ## 非存储器, 非索引的寻址
+/// + 隐式寻址(Implied)(**不实现**): 操作数的地址隐含于操作码, 且不是存储器地址
+/// + 累加器寻址(Accumulator)(**不实现**): 操作数为 A(the accumulator)
+/// + 直接寻址(Immediate): 操作数在指令第二个字节
+/// ## 非索引的存储器寻址
+/// + 绝对寻址(Absolute): 指令第二三个字节为操作数地址, 小端序
+/// + 0 页面寻址(ZeroPage): 指令第二个字节为操作数地址, 只能寻址 0x00..=0xfe (0 页): `LDA $35`
+/// + 相对寻址(Relative)(**不实现**): branch 指令使用, 指令的第二个字节为操作数, 加到下一指令的 PC 上
+/// + 间接寻址(Indirect)(**不实现**): jmp (三字节指令)使用, 二三字节储存一个地址, 将该地址处的值(16bit)加载到 PC 中, 即该地址处的值是操作数地址: `JMP  ($1000)`
+/// + 0 页面间接寻址(**不实现**): jmp 使用, 第二字节是 0 页面的一个地址, 该地址处的值(16bit)为操作数地址
+/// ## 基于索引(X, Y)的存储器寻址
+/// + 绝对变址寻址(Absolute_X, Absolute_Y): 指令第二三个字节加上 X 或 Y 为操作数地址: `STA $1000,Y`
+/// + 0 页面变址寻址(ZeroPage_X, ZeroPage_Y): 指令第二个字节加上 X 或 Y 为操作数地址, 且不进位到 0 页以外 `LDA $C0,X`
+/// + Indexed Indirect(Indirect_X): 第二个字节的值(8bit)加上 X(不进位) 是一个地址, 该地址处的值(16bit)是操作数的地址: `LDA ($20,X)`
+/// + Indirect Indexed(Indirect_Y): 第二个字节的值是一个地址, 该地址处的值(16bit)加上 Y 是操作数的地址: `LDA ($86),Y`
+/// + Indexed Indirect 非 0 页面形式(**不实现**): 指令的二三字节(16bit)加上 X, 后续相同
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub enum AddressingMode {
+   Immediate,
+   ZeroPage,
+   ZeroPage_X,
+   ZeroPage_Y,
+   Absolute,
+   Absolute_X,
+   Absolute_Y,
+   Indirect_X,
+   Indirect_Y,
+   NoneAddressing,
+}
+
 /// # CPU struct
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
 pub struct CPU {
     pub register_a: u8,
     pub register_x: u8,
+    pub register_y: u8,
     pub status: u8,
     pub program_counter: u16,
     memory: [u8; 0xFFFF],
@@ -13,6 +48,7 @@ impl CPU {
         CPU {
             register_a: 0,
             register_x: 0,
+            register_y: 0,
             status: 0,
             program_counter: 0,
             memory: [0; 0xFFFF],
@@ -54,6 +90,7 @@ impl CPU {
     pub fn reset(&mut self) {
         self.register_a = 0;
         self.register_x = 0;
+        self.register_y = 0;
         self.status = 0;
 
         self.program_counter = self.mem_read_u16(0xFFFC);
@@ -74,10 +111,8 @@ impl CPU {
             match opcode {
                 // mode, syntax, len, time, flags
                 0xA9 => { // Immediate, LDA #$44, 2, 2, NZ
-                    let param = self.mem_read(self.program_counter);
+                    self.lda(&AddressingMode::Immediate);
                     self.program_counter += 1;
-
-                    self.lda(param);
                 }
                 0xAA => { // Implied, TAX, 1, 2, NZ
                     self.tax();
@@ -93,7 +128,46 @@ impl CPU {
         }
     }
 
-    fn lda(&mut self, value: u8) {
+    fn get_operand_address(&self, mode: &AddressingMode) -> u16 {
+        match mode {
+            AddressingMode::Immediate => self.program_counter,
+            AddressingMode::ZeroPage => self.mem_read(self.program_counter) as u16,
+            AddressingMode::ZeroPage_X => {
+                let pos = self.mem_read(self.program_counter);
+                pos.wrapping_add(self.register_x) as u16
+            }
+            AddressingMode::ZeroPage_Y => {
+                let pos = self.mem_read(self.program_counter);
+                pos.wrapping_add(self.register_y) as u16
+            }
+            AddressingMode::Absolute => self.mem_read_u16(self.program_counter),
+            AddressingMode::Absolute_X => {
+                let pos = self.mem_read_u16(self.program_counter);
+                pos.wrapping_add(self.register_x as u16)
+            }
+            AddressingMode::Absolute_Y => {
+                let pos = self.mem_read_u16(self.program_counter);
+                pos.wrapping_add(self.register_y as u16)
+            }
+            AddressingMode::Indirect_X => {
+                let base = self.mem_read(self.program_counter);
+                let ptr = base.wrapping_add(self.register_x) as u16;
+                self.mem_read_u16(ptr)
+            }
+            AddressingMode::Indirect_Y => {
+                let ptr = self.mem_read(self.program_counter);
+                let addr_base = self.mem_read_u16(ptr as u16);
+                addr_base.wrapping_add(self.register_y as u16)
+            }
+            AddressingMode::NoneAddressing => {
+                panic!("mode {:?} is not supported", mode);
+            }
+        }
+    }
+
+    fn lda(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
         self.register_a = value;
 
         self.update_flag_nz(self.register_a);
