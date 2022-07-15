@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use bitflags::bitflags;
 use crate::opcodes;
 
 /// # 寻址模式
@@ -35,13 +35,41 @@ pub enum AddressingMode {
    NoneAddressing,
 }
 
+bitflags! {
+    /// CPU 状态寄存器(NV-BDIZC)
+    /// - 0 `CARRY`: 进位标志，如果计算结果产生进位，则置 1
+    /// - 1 `ZERO`: 零标志，如果结算结果为 0，则置 1
+    /// - 2 `INTERRUPT_DISABLE`: 中断去使能标志，置 1 则可屏蔽掉 IRQ 中断
+    /// - 3 `DECIMAL`: 十进制模式，未使用
+    /// - 4 `BREAK`: BRK，后面解释
+    /// - 5 `BREAK2` or `U`: 未使用, 后面解释
+    /// - 6 `OVERFLOW`: 溢出标志，如果结算结果产生了溢出，则置 1
+    /// - 7 `NEGATIVE`: 负标志，如果计算结果为负，则置 1
+    /// 其中, B, U 并非实际位, 在执行某些指令时, 标志位 push 或 pop 时附加这两位
+    /// 以区分 BRK 出发还是 IRQ 触发
+    /// - PHP 触发, UB=11, push 后对 P 无影响
+    /// - BRK 触发, UB=11, push 后 I 置为 1
+    /// - IRQ 触发, UB=10, push 后 I 置为 1
+    /// - MNI 触发, UB=10, push 后 I 置为 1
+    pub struct CpuFlags : u8 {
+        const CARRY = 0b0000_0001;
+        const ZERO = 0b0000_0010;
+        const INTERRUPT_DISABLE = 0b0000_0100;
+        const DECIMAL = 0b0000_1000;
+        const BREAK = 0b0001_0000;
+        const BREAK2 = 0b0010_0000;
+        const OVERFLOW = 0b0100_0000;
+        const NEGATIVE = 0b1000_0000;
+    }
+}
+
 /// # CPU struct
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
 pub struct CPU {
     pub register_a: u8,
     pub register_x: u8,
     pub register_y: u8,
-    pub status: u8,
+    pub status: CpuFlags,
     pub program_counter: u16,
     memory: [u8; 0xFFFF],
 }
@@ -52,7 +80,7 @@ impl CPU {
             register_a: 0,
             register_x: 0,
             register_y: 0,
-            status: 0,
+            status: CpuFlags::from_bits_truncate(0b100100),
             program_counter: 0,
             memory: [0; 0xFFFF],
         }
@@ -94,7 +122,7 @@ impl CPU {
         self.register_a = 0;
         self.register_x = 0;
         self.register_y = 0;
-        self.status = 0;
+        self.status = CpuFlags::from_bits_truncate(0b100100);
 
         self.program_counter = self.mem_read_u16(0xFFFC);
     }
@@ -184,7 +212,7 @@ impl CPU {
         let value = self.mem_read(addr);
         self.register_a = value;
 
-        self.update_flag_nz(self.register_a);
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn sta(&mut self, mode: &AddressingMode) {
@@ -195,26 +223,26 @@ impl CPU {
     fn tax(&mut self) {
         self.register_x = self.register_a;
 
-        self.update_flag_nz(self.register_x);
+        self.update_zero_and_negative_flags(self.register_x);
     }
 
     fn inx(&mut self) {
         (self.register_x, _ ) =self.register_x.overflowing_add(1);
 
-        self.update_flag_nz(self.register_x);
+        self.update_zero_and_negative_flags(self.register_x);
     }
 
-    fn update_flag_nz(&mut self, result: u8) {
+    fn update_zero_and_negative_flags(&mut self, result: u8) {
         if result == 0 { // Z
-            self.status = self.status | 0b0000_0010;
+            self.status.insert(CpuFlags::ZERO);
         } else {
-            self.status = self.status & 0b1111_1101;
+            self.status.remove(CpuFlags::ZERO);
         }
 
         if result & 0b1000_0000 != 0 { // N
-            self.status = self.status | 0b1000_0000;
+            self.status.insert(CpuFlags::NEGATIVE);
         } else {
-            self.status = self.status & 0b0111_1111;
+            self.status.remove(CpuFlags::NEGATIVE);
         }
     }
 }
@@ -229,8 +257,8 @@ mod tests {
         let mut cpu = CPU::new();
         cpu.load_and_run(vec![0xa9, 0x05, 0x00]); // LDA #$05; BRK
         assert_eq!(cpu.register_a, 0x05);
-        assert!(cpu.status & 0b0000_0010 == 0b00); // Z is 0
-        assert!(cpu.status & 0b1000_0000 == 0b00); // N is 0
+        assert!(cpu.status.bits() & 0b0000_0010 == 0b00); // Z is 0
+        assert!(cpu.status.bits() & 0b1000_0000 == 0b00); // N is 0
     }
 
     #[test]
@@ -238,7 +266,7 @@ mod tests {
         let mut cpu = CPU::new();
         cpu.load_and_run(vec![0xa9, 0x00, 0x00]); // LDA #$00; BRK
         assert_eq!(cpu.register_a, 0x00);
-        assert!(cpu.status & 0b0000_0010 == 0b10); // Z is 1
+        assert!(cpu.status.bits() & 0b0000_0010 == 0b10); // Z is 1
     }
 
     #[test]
@@ -246,7 +274,7 @@ mod tests {
         let mut cpu = CPU::new();
         cpu.load_and_run(vec![0xa9, 0xff, 0x00]); // LDA #$FF; BRK
         assert_eq!(cpu.register_a, 0xff);
-        assert!(cpu.status & 0b1000_0000 == 0b1000_0000); // N is 1
+        assert!(cpu.status.bits() & 0b1000_0000 == 0b1000_0000); // N is 1
     }
 
     #[test]
