@@ -22,8 +22,17 @@ impl OpCode {
     }
 }
 
-lazy_static!{
+lazy_static! {
     pub static ref CPU_OPCODES: Vec<OpCode> = vec![
+        // ADC(+:add 1 cycle if page boundary crossed), NVZC
+        OpCode::new(0x69, "ADC", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0x65, "ADC", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0x75, "ADC", 2, 4, AddressingMode::ZeroPage_X),
+        OpCode::new(0x6d, "ADC", 3, 4, AddressingMode::Absolute),
+        OpCode::new(0x7d, "ADC", 3, 4, AddressingMode::Absolute_X), // 4+
+        OpCode::new(0x79, "ADC", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0x61, "ADC", 2, 6, AddressingMode::Indirect_X),
+        OpCode::new(0x71, "ADC", 2, 5, AddressingMode::Indirect_Y), // 5+
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
         // LDA(+:add 1 cycle if page boundary crossed), NZ

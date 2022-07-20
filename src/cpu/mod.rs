@@ -145,7 +145,9 @@ impl CPU {
             let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
 
             match code {
-                // mode, syntax, len, time, flags
+                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
+                    self.adc(&opcode.mode);
+                }
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
                     self.lda(&opcode.mode);
                 }
@@ -207,6 +209,32 @@ impl CPU {
         }
     }
 
+    fn adc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        let result = self.register_a as u16
+            + value as u16
+            + self.status.contains(CpuFlags::CARRY) as u16;
+
+        // CARRY
+        if result > 0xff {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        let result = result as u8;
+
+        // OVERFLOW
+        match (self.register_a >> 7, value >> 7, result >> 7){
+            (1, 1, 0) | (0, 0, 1) => self.status.insert(CpuFlags::OVERFLOW),
+            _ => self.status.remove(CpuFlags::OVERFLOW)
+        }
+        self.update_zero_and_negative_flags(result);
+        self.register_a = result;
+    }
+
     fn lda(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
@@ -227,8 +255,7 @@ impl CPU {
     }
 
     fn inx(&mut self) {
-        (self.register_x, _ ) =self.register_x.overflowing_add(1);
-
+        self.register_x = self.register_x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_x);
     }
 
@@ -315,5 +342,19 @@ mod tests {
         cpu.run();
 
         assert_eq!(cpu.register_x, 1)
+    }
+
+    #[test]
+    fn test_adc_add_2_bytes() {
+        let mut cpu = CPU::new();
+        // LDA $0x10; ADC $0x12; STA $0x14; LDA $0x11; ADC $0x13; STA $0x15; BRK
+        cpu.load(vec![0xa5, 0x10, 0x65, 0x12, 0x85, 0x14,
+            0xa5, 0x11, 0x65, 0x13, 0x85, 0x15, 0x00
+            ]);
+        cpu.reset();
+        cpu.mem_write_u16(0x10, 0x01ff);
+        cpu.mem_write_u16(0x12, 0x01);
+        cpu.run();
+        assert_eq!(cpu.mem_read_u16(0x14), 0x0200);
     }
 }
