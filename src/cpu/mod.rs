@@ -37,7 +37,7 @@ pub enum AddressingMode {
 
 bitflags! {
     /// CPU 状态寄存器(NV-BDIZC)
-    /// - 0 `CARRY`: 进位标志，如果计算结果产生进位，则置 1
+    /// - 0 `CARRY`: 进位标志，如果计算结果产生进位，则置 1(同时 !CARRY 作为减法的借位标志)
     /// - 1 `ZERO`: 零标志，如果结算结果为 0，则置 1
     /// - 2 `INTERRUPT_DISABLE`: 中断去使能标志，置 1 则可屏蔽掉 IRQ 中断
     /// - 3 `DECIMAL`: 十进制模式，未使用
@@ -151,6 +151,9 @@ impl CPU {
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
                     self.lda(&opcode.mode);
                 }
+                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
+                    self.sbc(&opcode.mode);
+                }
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
                     self.sta(&&opcode.mode);
                 }
@@ -213,6 +216,20 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
 
+        self.add_to_a_with_carry_update_nvzc(value);
+    }
+
+    fn sbc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+
+        // A 寄存器 A, M 操作数, B borrow bit, C carry bit
+        // A <- A - M - B = A - M - !C = A - M - 1 + C
+        //   = A + (!M + 1) - 1 + C = A + !M + C (若和大于 255, 则不需要借位, Carry 为 1, 与加法处相同)
+        self.add_to_a_with_carry_update_nvzc(!value); // 取负数并变补码
+    }
+
+    fn add_to_a_with_carry_update_nvzc(&mut self, value: u8) {
         let result = self.register_a as u16
             + value as u16
             + self.status.contains(CpuFlags::CARRY) as u16;
@@ -234,6 +251,11 @@ impl CPU {
         self.update_zero_and_negative_flags(result);
         self.register_a = result;
     }
+
+    // fn and(&mut self, mode: &AddressingMode) {
+    //     let addr = self.get_operand_address(mode);
+
+    // }
 
     fn lda(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
@@ -355,6 +377,50 @@ mod tests {
         cpu.mem_write_u16(0x10, 0x01ff);
         cpu.mem_write_u16(0x12, 0x01);
         cpu.run();
-        assert_eq!(cpu.mem_read_u16(0x14), 0x0200);
+        assert_eq!(cpu.mem_read_u16(0x14), 0x0200); // 0x01ff + 0x01 == 0x0200
+    }
+
+    #[test]
+    fn test_sbc_5_minus_1() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xa9, 0x5, // LDA #$0x5
+            0xe9, 0x1, // SBC #$0x1
+            0x00 // BRK
+        ]);
+        cpu.reset();
+        cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
+        cpu.run();
+        assert_eq!(cpu.register_a, 4);
+    }
+
+    #[test]
+    fn test_sbc_1_minus_5() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xa9, 0x1, // LDA #$0x5
+            0xe9, 0x5, // SBC #$0x1
+            0x00 // BRK
+        ]);
+        cpu.reset();
+        cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
+        cpu.run();
+        assert_eq!(cpu.register_a, -4i8 as u8);
+    }
+
+    #[test]
+    fn test_sbc_sub_2_bytes() {
+        let mut cpu = CPU::new();
+        // LDA $0x10; SBC $0x12; STA $0x14; LDA $0x11; SBC $0x13; STA $0x15; BRK
+        cpu.load(vec![
+            0xa5, 0x10, 0xe5, 0x12, 0x85, 0x14,
+            0xa5, 0x11, 0xe5, 0x13, 0x85, 0x15, 0x00
+            ]);
+        cpu.reset();
+        cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
+        cpu.mem_write_u16(0x10, 0x0200);
+        cpu.mem_write_u16(0x12, 0x01);
+        cpu.run();
+        assert_eq!(cpu.mem_read_u16(0x14), 0x01ff); // 0x0200 - 0x01 == 0x01ff
     }
 }
