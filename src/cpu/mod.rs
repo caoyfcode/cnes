@@ -145,17 +145,31 @@ impl CPU {
             let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
 
             match code {
-                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
-                    self.adc(&opcode.mode);
-                }
+                // load/store
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
                     self.lda(&opcode.mode);
                 }
-                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
-                    self.sbc(&opcode.mode);
+                0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
+                    self.ldx(&opcode.mode);
+                }
+                0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
+                    self.ldy(&opcode.mode);
                 }
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
                     self.sta(&&opcode.mode);
+                }
+                0x86 | 0x96 | 0x8e => {
+                    self.stx(&opcode.mode);
+                }
+                0x84 | 0x94 | 0x8c => {
+                    self.sty(&opcode.mode);
+                }
+                // 算数操作
+                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
+                    self.adc(&opcode.mode);
+                }
+                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
+                    self.sbc(&opcode.mode);
                 }
                 0xAA => {
                     self.tax();
@@ -212,6 +226,45 @@ impl CPU {
         }
     }
 
+    fn lda(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_a = value;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn ldx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_x = value;
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn ldy(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_y = value;
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn sta(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_a);
+    }
+
+    fn stx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_x);
+    }
+
+    fn sty(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_y);
+    }
+
     fn adc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
@@ -256,19 +309,6 @@ impl CPU {
     //     let addr = self.get_operand_address(mode);
 
     // }
-
-    fn lda(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
-        let value = self.mem_read(addr);
-        self.register_a = value;
-
-        self.update_zero_and_negative_flags(self.register_a);
-    }
-
-    fn sta(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
-        self.mem_write(addr, self.register_a);
-    }
 
     fn tax(&mut self) {
         self.register_x = self.register_a;
@@ -422,5 +462,30 @@ mod tests {
         cpu.mem_write_u16(0x12, 0x01);
         cpu.run();
         assert_eq!(cpu.mem_read_u16(0x14), 0x01ff); // 0x0200 - 0x01 == 0x01ff
+    }
+
+    #[test]
+    fn test_load_and_store() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xa6, 0x10, // LDX $0x10 ; X <- *0x10
+            0xac, 0x00, 0x02, // LDY $0x0200 ; Y <= *0x0200
+            0xa1, 0x04, // LDA ($0x04, X) ; A <- **(X + 0x04)
+            0x96, 0x02, // STX $0x02, Y ; *(0x02 + Y) <- X
+            0x94, 0x02, // STY $0x02, X ; *(0x02 + X) <- Y
+            0x91, 0x10, // STA ($0x10), Y ; *(*0x10 + Y) <- A
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.mem_write(0x10, 0x14);
+        cpu.mem_write(0x0200, 0x50);
+        cpu.mem_write(0x18, 0x10);
+        cpu.run();
+        assert_eq!(cpu.register_x, 0x14);
+        assert_eq!(cpu.register_y, 0x50);
+        assert_eq!(cpu.register_a, 0x14);
+        assert_eq!(cpu.mem_read(0x52), 0x14);
+        assert_eq!(cpu.mem_read(0x16), 0x50);
+        assert_eq!(cpu.mem_read(0x14 + 0x50), 0x14);
     }
 }
