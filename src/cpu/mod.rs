@@ -3,7 +3,7 @@ use bitflags::bitflags;
 use crate::opcodes;
 
 /// # 寻址模式
-/// 6502 有 15 种寻址模式, 仅仅实现存储器的寻址, 且如果不是对该地址进行一般的读写也不实现
+/// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
 /// ## 非存储器, 非索引的寻址
 /// + 隐式寻址(Implied)(**不实现**): 操作数的地址隐含于操作码, 且不是存储器地址
 /// + 累加器寻址(Accumulator)(**不实现**): 操作数为 A(the accumulator)
@@ -13,13 +13,13 @@ use crate::opcodes;
 /// + 0 页面寻址(ZeroPage): 指令第二个字节为操作数地址, 只能寻址 0x00..=0xfe (0 页): `LDA $35`
 /// + 相对寻址(Relative)(**不实现**): branch 指令使用, 指令的第二个字节为操作数, 加到下一指令的 PC 上
 /// + 间接寻址(Indirect)(**不实现**): jmp (三字节指令)使用, 二三字节储存一个地址, 将该地址处的值(16bit)加载到 PC 中, 即该地址处的值是操作数地址: `JMP  ($1000)`
-/// + 0 页面间接寻址(**不实现**): jmp 使用, 第二字节是 0 页面的一个地址, 该地址处的值(16bit)为操作数地址
+/// + <del>0 页面间接寻址(**不实现**): jmp 使用, 第二字节是 0 页面的一个地址, 该地址处的值(16bit)为操作数地址</del>
 /// ## 基于索引(X, Y)的存储器寻址
 /// + 绝对变址寻址(Absolute_X, Absolute_Y): 指令第二三个字节加上 X 或 Y 为操作数地址: `STA $1000,Y`
 /// + 0 页面变址寻址(ZeroPage_X, ZeroPage_Y): 指令第二个字节加上 X 或 Y 为操作数地址, 且不进位到 0 页以外 `LDA $C0,X`
 /// + Indexed Indirect(Indirect_X): 第二个字节的值(8bit)加上 X(不进位) 是一个地址, 该地址处的值(16bit)是操作数的地址: `LDA ($20,X)`
 /// + Indirect Indexed(Indirect_Y): 第二个字节的值是一个地址, 该地址处的值(16bit)加上 Y 是操作数的地址: `LDA ($86),Y`
-/// + Indexed Indirect 非 0 页面形式(**不实现**): 指令的二三字节(16bit)加上 X, 后续相同
+/// + <del>Indexed Indirect 非 0 页面形式(**不实现**): 指令的二三字节(16bit)加上 X, 后续相同</del>
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum AddressingMode {
@@ -71,8 +71,12 @@ pub struct CPU {
     pub register_y: u8,
     pub status: CpuFlags,
     pub program_counter: u16,
+    pub stack_pointer: u8,
     memory: [u8; 0xFFFF],
 }
+
+const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
+const STACK_RESET: u8 = 0xff;
 
 impl CPU {
     pub fn new() -> Self {
@@ -82,6 +86,7 @@ impl CPU {
             register_y: 0,
             status: CpuFlags::from_bits_truncate(0b100100),
             program_counter: 0,
+            stack_pointer: 0,
             memory: [0; 0xFFFF],
         }
     }
