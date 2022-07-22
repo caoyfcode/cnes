@@ -76,7 +76,7 @@ pub struct CPU {
 }
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
-const STACK_RESET: u8 = 0xff;
+const STACK_RESET: u8 = 0xfd;
 
 impl CPU {
     pub fn new() -> Self {
@@ -86,7 +86,7 @@ impl CPU {
             register_y: 0,
             status: CpuFlags::from_bits_truncate(0b100100),
             program_counter: 0,
-            stack_pointer: 0,
+            stack_pointer: STACK_RESET,
             memory: [0; 0xFFFF],
         }
     }
@@ -128,6 +128,7 @@ impl CPU {
         self.register_x = 0;
         self.register_y = 0;
         self.status = CpuFlags::from_bits_truncate(0b100100);
+        self.stack_pointer = STACK_RESET;
 
         self.program_counter = self.mem_read_u16(0xFFFC);
     }
@@ -169,18 +170,34 @@ impl CPU {
                 0x84 | 0x94 | 0x8c => {
                     self.sty(&opcode.mode);
                 }
-                // 算数操作
+                // 递增/递减
+                0xE8 => {
+                    self.inx();
+                }
+                // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
                 }
                 0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
                     self.sbc(&opcode.mode);
                 }
-                0xAA => {
+                0xaa => {
                     self.tax();
                 }
-                0xE8 => {
-                    self.inx();
+                0xa8 => {
+                    self.tay();
+                }
+                0xba => {
+                    self.tsx();
+                }
+                0x8a => {
+                    self.txa();
+                }
+                0x9a => {
+                    self.txs();
+                }
+                0x98 => {
+                    self.tya();
                 }
                 0x00 => { // BRK
                     return;  // just end
@@ -270,6 +287,11 @@ impl CPU {
         self.mem_write(addr, self.register_y);
     }
 
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
     fn adc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
@@ -321,9 +343,32 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_x);
     }
 
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
+    fn tay(&mut self) {
+        self.register_y = self.register_a;
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn tsx(&mut self) {
+        self.register_x = self.stack_pointer;
+
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn txa(&mut self) {
+        self.register_a = self.register_x;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn txs(&mut self) {
+        self.stack_pointer = self.register_x;
+    }
+
+    fn tya(&mut self) {
+        self.register_a = self.register_y;
+
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn update_zero_and_negative_flags(&mut self, result: u8) {
@@ -492,5 +537,19 @@ mod tests {
         assert_eq!(cpu.mem_read(0x52), 0x14);
         assert_eq!(cpu.mem_read(0x16), 0x50);
         assert_eq!(cpu.mem_read(0x14 + 0x50), 0x14);
+    }
+
+    #[test]
+    fn test_transfer() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x03, // LDA #$03
+            0xa8, // TAY
+            0xba, // TSX
+            0x8a, // TXA
+        ]);
+        assert_eq!(cpu.register_y, 0x03);
+        assert_eq!(cpu.register_x, cpu.stack_pointer);
+        assert_eq!(cpu.register_a, cpu.register_x);
     }
 }

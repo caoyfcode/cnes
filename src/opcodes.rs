@@ -65,15 +65,9 @@ lazy_static! {
         OpCode::new(0xb4, "LDY", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0xac, "LDY", 3, 4, AddressingMode::Absolute),
         OpCode::new(0xbc, "LDY", 3, 4, AddressingMode::Absolute_Y), // 4+
-        // Register Instruction, NZ
-        OpCode::new(0xaa, "TAX", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0x8a, "TXA", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0xca, "DEX", 1, 2, AddressingMode::NoneAddressing),
+        // INX, NZ
         OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0xa8, "TAY", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0x98, "TYA", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0x88, "DEY", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0xc8, "INY", 1, 2, AddressingMode::NoneAddressing),
+
         // SBC(+:add 1 cycle if page boundary crossed), NVZC
         OpCode::new(0xe9, "SBC", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xe5, "SBC", 2, 3, AddressingMode::ZeroPage),
@@ -99,6 +93,13 @@ lazy_static! {
         OpCode::new(0x84, "STY", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0x94, "STY", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0x8c, "STY", 3, 4, AddressingMode::Absolute),
+        // Transfer, NZ(TXS none)
+        OpCode::new(0xaa, "TAX", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xa8, "TAY", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xba, "TSX", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x8a, "TXA", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x9a, "TXS", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x98, "TYA", 1, 2, AddressingMode::NoneAddressing),
     ];
 
     pub static ref OPCODES_MAP: HashMap<u8, &'static OpCode> = {
