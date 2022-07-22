@@ -184,8 +184,23 @@ impl CPU {
                     self.plp();
                 }
                 // 递增/递减
-                0xE8 => {
+                0xc6 | 0xd6 | 0xce | 0xde => {
+                    self.dec(&opcode.mode);
+                }
+                0xca => {
+                    self.dex();
+                }
+                0x88 => {
+                    self.dey();
+                }
+                0xe6 | 0xf6 | 0xee | 0xfe => {
+                    self.inc(&opcode.mode);
+                }
+                0xe8 => {
                     self.inx();
+                }
+                0xc8 => {
+                    self.iny();
                 }
                 // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
@@ -300,11 +315,6 @@ impl CPU {
         self.mem_write(addr, self.register_y);
     }
 
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
     fn pha(&mut self) {
         self.stack_push(self.register_a);
     }
@@ -335,6 +345,46 @@ impl CPU {
     fn stack_pop(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.mem_read(STACK + self.stack_pointer as u16)
+    }
+
+    fn dec(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr).wrapping_sub(1);
+        self.mem_write(addr, value);
+
+        self.update_zero_and_negative_flags(value);
+    }
+
+    fn dex(&mut self) {
+        self.register_x = self.register_x.wrapping_sub(1);
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn dey(&mut self) {
+        self.register_y = self.register_y.wrapping_sub(1);
+
+        self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn inc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr).wrapping_add(1);
+        self.mem_write(addr, value);
+
+        self.update_zero_and_negative_flags(value);
+    }
+
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn iny(&mut self) {
+        self.register_y = self.register_y.wrapping_add(1);
+
+        self.update_zero_and_negative_flags(self.register_y);
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -611,5 +661,27 @@ mod tests {
         ]);
         assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16), 0x50);
         assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16 - 1), cpu.register_a);
+    }
+
+    #[test]
+    fn test_decrement_and_increment() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xc6, 0x10, // DEC $10
+            0xee, 0x00, 0x02,// INC $0200
+            0xa2, 0x03, // LDX #$03
+            0xca, // DEX
+            0xa0, 0x04, // LDY #$04
+            0xc8, // INY
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.mem_write(0x10, 0x6);
+        cpu.mem_write(0x0200, 0x6);
+        cpu.run();
+        assert_eq!(cpu.mem_read(0x10), 0x5);
+        assert_eq!(cpu.mem_read(0x0200), 0x7);
+        assert_eq!(cpu.register_x, 0x2);
+        assert_eq!(cpu.register_y, 0x5);
     }
 }
