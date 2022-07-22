@@ -67,7 +67,12 @@ lazy_static! {
         OpCode::new(0xbc, "LDY", 3, 4, AddressingMode::Absolute_Y), // 4+
         // INX, NZ
         OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
-
+        // stack push, none
+        OpCode::new(0x48, "PHA", 1, 3, AddressingMode::NoneAddressing),
+        OpCode::new(0x08, "PHP", 1, 3, AddressingMode::NoneAddressing),
+        // stack pop(pull), NZ(PLP all)
+        OpCode::new(0x68, "PLA", 1, 4, AddressingMode::NoneAddressing),
+        OpCode::new(0x28, "PLP", 1, 4, AddressingMode::NoneAddressing),
         // SBC(+:add 1 cycle if page boundary crossed), NVZC
         OpCode::new(0xe9, "SBC", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xe5, "SBC", 2, 3, AddressingMode::ZeroPage),

@@ -71,7 +71,7 @@ pub struct CPU {
     pub register_y: u8,
     pub status: CpuFlags,
     pub program_counter: u16,
-    pub stack_pointer: u8,
+    pub stack_pointer: u8,  // 指向空位置
     memory: [u8; 0xFFFF],
 }
 
@@ -169,6 +169,19 @@ impl CPU {
                 }
                 0x84 | 0x94 | 0x8c => {
                     self.sty(&opcode.mode);
+                }
+                // push/pop
+                0x48 => {
+                    self.pha();
+                }
+                0x08 => {
+                    self.php();
+                }
+                0x68 => {
+                    self.pla();
+                }
+                0x28 => {
+                    self.plp();
                 }
                 // 递增/递减
                 0xE8 => {
@@ -290,6 +303,38 @@ impl CPU {
     fn inx(&mut self) {
         self.register_x = self.register_x.wrapping_add(1);
         self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn pha(&mut self) {
+        self.stack_push(self.register_a);
+    }
+
+    fn php(&mut self) {
+        let mut status = self.status.clone();
+        status.insert(CpuFlags::BREAK2);
+        status.insert(CpuFlags::BREAK);  // UB = 11 if PHP
+        self.stack_push(status.bits());
+    }
+
+    fn pla(&mut self) {
+        self.register_a = self.stack_pop();
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn plp(&mut self) {
+        self.status.bits = self.stack_pop();
+        self.status.insert(CpuFlags::BREAK2);
+        self.status.remove(CpuFlags::BREAK);
+    }
+
+    fn stack_push(&mut self, data: u8) {
+        self.mem_write(STACK + self.stack_pointer as u16, data);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+    }
+
+    fn stack_pop(&mut self) -> u8 {
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
+        self.mem_read(STACK + self.stack_pointer as u16)
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -547,9 +592,24 @@ mod tests {
             0xa8, // TAY
             0xba, // TSX
             0x8a, // TXA
+            0x00, // BRK
         ]);
         assert_eq!(cpu.register_y, 0x03);
         assert_eq!(cpu.register_x, cpu.stack_pointer);
         assert_eq!(cpu.register_a, cpu.register_x);
+    }
+
+    #[test]
+    fn test_stack_push_pop() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x50, // LDA #$50
+            0x48, // PHA
+            0x08, // PHP
+            0x68, // PLA
+            0x00, // BRK
+        ]);
+        assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16), 0x50);
+        assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16 - 1), cpu.register_a);
     }
 }
