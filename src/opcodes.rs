@@ -42,6 +42,12 @@ lazy_static! {
         // OpCode::new(0x39, "AND", 3, 4, AddressingMode::Absolute_Y), // 4+
         // OpCode::new(0x21, "AND", 2, 6, AddressingMode::Indirect_X),
         // OpCode::new(0x31, "AND", 2, 5, AddressingMode::Indirect_Y), // 5+
+        // ASL, NZC
+        OpCode::new(0x0a, "ASL", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
+        OpCode::new(0x06, "ASL", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0x16, "ASL", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0x0e, "ASL", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0x1e, "ASL", 3, 7, AddressingMode::Absolute_X),
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
         // LDA(+:add 1 cycle if page boundary crossed), NZ
@@ -65,6 +71,12 @@ lazy_static! {
         OpCode::new(0xb4, "LDY", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0xac, "LDY", 3, 4, AddressingMode::Absolute),
         OpCode::new(0xbc, "LDY", 3, 4, AddressingMode::Absolute_Y), // 4+
+        // LSR, NZC
+        OpCode::new(0x4a, "LSR", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
+        OpCode::new(0x46, "LSR", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0x56, "LSR", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0x4e, "LSR", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0x5e, "LSR", 3, 7, AddressingMode::Absolute_X),
         // decrement, NZ
         OpCode::new(0xc6, "DEC", 2, 5, AddressingMode::ZeroPage),
         OpCode::new(0xd6, "DEC", 2, 6, AddressingMode::ZeroPage_X),
@@ -85,6 +97,18 @@ lazy_static! {
         // stack pop(pull), NZ(PLP all)
         OpCode::new(0x68, "PLA", 1, 4, AddressingMode::NoneAddressing),
         OpCode::new(0x28, "PLP", 1, 4, AddressingMode::NoneAddressing),
+        // ROL, NZC
+        OpCode::new(0x2a, "ROL", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
+        OpCode::new(0x26, "ROL", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0x36, "ROL", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0x2e, "ROL", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0x3e, "ROL", 3, 7, AddressingMode::Absolute_X),
+        // ROR, NZC
+        OpCode::new(0x6a, "ROR", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
+        OpCode::new(0x66, "ROR", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0x76, "ROR", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0x6e, "ROR", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0x7e, "ROR", 3, 7, AddressingMode::Absolute_X),
         // SBC(+:add 1 cycle if page boundary crossed), NVZC
         OpCode::new(0xe9, "SBC", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xe5, "SBC", 2, 3, AddressingMode::ZeroPage),

@@ -202,6 +202,31 @@ impl CPU {
                 0xc8 => {
                     self.iny();
                 }
+                // 移位
+                0x0a => {
+                    self.asl_a();
+                }
+                0x06 | 0x16 | 0x0e | 0x1e => {
+                    self.asl(&opcode.mode);
+                }
+                0x4a => {
+                    self.lsr_a();
+                }
+                0x46 | 0x56 | 0x4e | 0x5e => {
+                    self.lsr(&opcode.mode);
+                }
+                0x2a => {
+                    self.rol_a();
+                }
+                0x26 | 0x36 | 0x2e | 0x3e => {
+                    self.rol(&opcode.mode);
+                }
+                0x6a => {
+                    self.ror_a();
+                }
+                0x66 | 0x76 | 0x6e | 0x7e => {
+                    self.ror(&opcode.mode);
+                }
                 // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
@@ -385,6 +410,104 @@ impl CPU {
         self.register_y = self.register_y.wrapping_add(1);
 
         self.update_zero_and_negative_flags(self.register_y);
+    }
+
+    fn asl_a(&mut self) {
+        self.register_a = self.arithmetic_shift_left_update_nzc(self.register_a);
+    }
+
+    fn asl(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.arithmetic_shift_left_update_nzc(data);
+        self.mem_write(addr, data);
+    }
+
+    fn arithmetic_shift_left_update_nzc(&mut self, data: u8) -> u8 {
+        if data & 0x80 == 0x80 {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        let result = data << 1;
+        self.update_zero_and_negative_flags(result);
+        result
+    }
+
+    fn lsr_a(&mut self) {
+        self.register_a = self.logical_shift_right_update_nzc(self.register_a);
+    }
+
+    fn lsr(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.logical_shift_right_update_nzc(data);
+        self.mem_write(addr, data);
+    }
+
+    fn logical_shift_right_update_nzc(&mut self, data:u8) -> u8 {
+        if data & 0x1 == 1 {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        let result = data >> 1;
+        self.update_zero_and_negative_flags(result);
+        result
+    }
+
+    fn rol_a(&mut self) {
+        self.register_a = self.rotate_left_through_carry_update_nzc(self.register_a);
+    }
+
+    fn rol(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.rotate_left_through_carry_update_nzc(data);
+        self.mem_write(addr, data);
+    }
+
+    fn rotate_left_through_carry_update_nzc(&mut self, data: u8) -> u8 {
+        let result = (data << 1) +
+            if self.status.contains(CpuFlags::CARRY) {
+                1u8
+            } else {
+                0u8
+            };
+        if data & 0x80 == 0x80 {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        self.update_zero_and_negative_flags(result);
+        result
+    }
+
+    fn ror_a(&mut self) {
+        self.register_a = self.rotate_right_through_carry_update_nzc(self.register_a);
+    }
+
+    fn ror(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.rotate_right_through_carry_update_nzc(data);
+        self.mem_write(addr, data);
+    }
+
+    fn rotate_right_through_carry_update_nzc(&mut self, data: u8) -> u8 {
+        let result = (data >> 1) +
+            if self.status.contains(CpuFlags::CARRY) {
+                0x80u8
+            } else {
+                0u8
+            };
+        if data & 0x1 == 1 {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        self.update_zero_and_negative_flags(result);
+        result
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -683,5 +806,56 @@ mod tests {
         assert_eq!(cpu.mem_read(0x0200), 0x7);
         assert_eq!(cpu.register_x, 0x2);
         assert_eq!(cpu.register_y, 0x5);
+    }
+
+    #[test]
+    fn test_asl() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0x0a, // ASL A
+            0x06, 0x10, // ASL $10
+            0x00, //BRK
+        ]);
+        cpu.reset();
+        cpu.register_a = 0x03;
+        cpu.mem_write(0x10, 0b1000_0000);
+        cpu.run();
+        assert_eq!(cpu.register_a, 0x06);
+        assert_eq!(cpu.mem_read(0x10), 0x0);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_lsr() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0x4a, // LSR A
+            0x46, 0x10, // LSR $10
+            0x00, //BRK
+        ]);
+        cpu.reset();
+        cpu.register_a = 0x03;
+        cpu.mem_write(0x10, 0b1000_0000);
+        cpu.run();
+        assert_eq!(cpu.register_a, 0x01);
+        assert_eq!(cpu.mem_read(0x10), 0b0100_0000);
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_rol_ror() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0x66, 0x10, // ROR $10
+            0x2e, 0x00, 0x02,  // ROL $0200
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.mem_write(0x10, 0b0000_0011);
+        cpu.mem_write(0x0200, 1);
+        cpu.run();
+        assert_eq!(cpu.mem_read(0x10), 1);
+        assert_eq!(cpu.mem_read(0x0200), 0b0000_0011);
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
     }
 }
