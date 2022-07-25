@@ -109,6 +109,11 @@ lazy_static! {
         OpCode::new(0xfe, "INC", 3, 7, AddressingMode::Absolute_X),
         OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xc8, "INY", 1, 2, AddressingMode::NoneAddressing),
+        // JMP, none
+        OpCode::new(0x4c, "JMP", 3, 3, AddressingMode::Absolute),
+        OpCode::new(0x6c, "JMP", 3, 5, AddressingMode::NoneAddressing), // Indirect
+        // JSR(jump to subroutine), none
+        OpCode::new(0x20, "JSR", 3, 6, AddressingMode::Absolute),
         // LDA(+:add 1 cycle if page boundary crossed), NZ
         OpCode::new(0xa9, "LDA", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xa5, "LDA", 2, 3, AddressingMode::ZeroPage),
@@ -163,6 +168,10 @@ lazy_static! {
         OpCode::new(0x76, "ROR", 2, 6, AddressingMode::ZeroPage_X),
         OpCode::new(0x6e, "ROR", 3, 6, AddressingMode::Absolute),
         OpCode::new(0x7e, "ROR", 3, 7, AddressingMode::Absolute_X),
+        // RTI(return from interrupt), all
+        OpCode::new(0x40, "RTI", 1, 6, AddressingMode::NoneAddressing),
+        // RTS(return from subroutine), None
+        OpCode::new(0x60, "RTS", 1, 6, AddressingMode::NoneAddressing),
         // SBC(+:add 1 cycle if page boundary crossed), NVZC
         OpCode::new(0xe9, "SBC", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xe5, "SBC", 2, 3, AddressingMode::ZeroPage),

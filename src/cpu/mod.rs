@@ -258,6 +258,22 @@ impl CPU {
                 0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
                     self.sbc(&opcode.mode);
                 }
+                // 跳转与返回
+                0x4c => {
+                    self.jmp_absolute();
+                }
+                0x6c => {
+                    self.jmp_indirect();
+                }
+                0x20 => {
+                    self.jsr();
+                }
+                0x40 => {
+                    self.rti();
+                }
+                0x60 => {
+                    self.rts();
+                }
                 // 分支
                 0x90 => { // BCC
                     if !self.status.contains(CpuFlags::CARRY) {
@@ -455,9 +471,22 @@ impl CPU {
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
+    fn stack_push_u16(&mut self, data: u16) {
+        let lo = (data & 0xff) as u8;
+        let hi = (data >> 8) as u8;
+        self.stack_push(hi);
+        self.stack_push(lo);
+    }
+
     fn stack_pop(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.mem_read(STACK + self.stack_pointer as u16)
+    }
+
+    fn stack_pop_u16(&mut self) -> u16 {
+        let lo = self.stack_pop() as u16;
+        let hi = self.stack_pop() as u16;
+        (hi << 8) | lo
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
@@ -702,6 +731,42 @@ impl CPU {
         }
         self.update_zero_and_negative_flags(result);
         self.register_a = result;
+    }
+
+    fn jmp_absolute(&mut self) {
+        self.program_counter = self.mem_read_u16(self.program_counter);
+    }
+
+    fn jmp_indirect(&mut self) {
+        // 间接寻址不会超过页面, 而是回环
+        let addr = self.mem_read_u16(self.program_counter);
+        let target = if addr & 0x00ff == 0x00ff {
+            let lo = self.mem_read(addr) as u16;
+            let hi = self.mem_read(addr & 0xff00) as u16;
+            (hi << 8) | lo
+        } else {
+            self.mem_read_u16(addr)
+        };
+        self.program_counter = target;
+    }
+
+    fn jsr(&mut self) {
+        // pushes the address-1 of the next operation on to the stack
+        let next_minus_1 = self.program_counter.wrapping_add(1);
+        self.stack_push_u16(next_minus_1);
+        self.program_counter = self.mem_read_u16(self.program_counter);
+    }
+
+    fn rts(&mut self) {
+        let next_minus_1 = self.stack_pop_u16();
+        self.program_counter = next_minus_1.wrapping_add(1);
+    }
+
+    fn rti(&mut self) {
+        self.status.bits = self.stack_pop();
+        self.status.insert(CpuFlags::BREAK2);
+        self.status.remove(CpuFlags::BREAK);
+        self.program_counter = self.stack_pop_u16();
     }
 
     fn branch(&mut self) {
