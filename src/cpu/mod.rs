@@ -258,6 +258,29 @@ impl CPU {
                 0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
                     self.sbc(&opcode.mode);
                 }
+                // 状态寄存器
+                0x18 => {
+                    self.clc();
+                }
+                0xd8 => {
+                    self.cld();
+                }
+                0x58 => {
+                    self.cli();
+                }
+                0xb8 => {
+                    self.clv();
+                }
+                0x38 => {
+                    self.sec();
+                }
+                0xf8 => {
+                    self.sed();
+                }
+                0x78 => {
+                    self.sei();
+                }
+                // 传送指令
                 0xaa => {
                     self.tax();
                 }
@@ -640,10 +663,33 @@ impl CPU {
         self.register_a = result;
     }
 
-    // fn and(&mut self, mode: &AddressingMode) {
-    //     let addr = self.get_operand_address(mode);
+    fn clc(&mut self) {
+        self.status.remove(CpuFlags::CARRY);
+    }
 
-    // }
+    fn cld(&mut self) {
+        self.status.remove(CpuFlags::DECIMAL);
+    }
+
+    fn cli(&mut self) {
+        self.status.remove(CpuFlags::INTERRUPT_DISABLE);
+    }
+
+    fn clv(&mut self) {
+        self.status.remove(CpuFlags::OVERFLOW);
+    }
+
+    fn sec(&mut self) {
+        self.status.insert(CpuFlags::CARRY);
+    }
+
+    fn sed(&mut self) {
+        self.status.insert(CpuFlags::DECIMAL);
+    }
+
+    fn sei(&mut self) {
+        self.status.insert(CpuFlags::INTERRUPT_DISABLE);
+    }
 
     fn tax(&mut self) {
         self.register_x = self.register_a;
@@ -1064,5 +1110,24 @@ mod tests {
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_status() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0x18, 0x00]); // CLC
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+        cpu.load_and_run(vec![0xd8, 0x00]); // CLD
+        assert!(!cpu.status.contains(CpuFlags::DECIMAL));
+        cpu.load_and_run(vec![0x58, 0x00]); // CLI
+        assert!(!cpu.status.contains(CpuFlags::INTERRUPT_DISABLE));
+        cpu.load_and_run(vec![0xb8, 0x00]); // CLV
+        assert!(!cpu.status.contains(CpuFlags::OVERFLOW));
+        cpu.load_and_run(vec![0x38, 0x00]); // SEC
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+        cpu.load_and_run(vec![0xf8, 0x00]); // SED
+        assert!(cpu.status.contains(CpuFlags::DECIMAL));
+        cpu.load_and_run(vec![0x78, 0x00]); // SEI
+        assert!(cpu.status.contains(CpuFlags::INTERRUPT_DISABLE));
     }
 }

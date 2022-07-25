@@ -53,6 +53,11 @@ lazy_static! {
         OpCode::new(0x2c, "BIT", 3, 4, AddressingMode::Absolute),
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        // Clear
+        OpCode::new(0x18, "CLC", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xd8, "CLD", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x58, "CLI", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xb8, "CLV", 1, 2, AddressingMode::NoneAddressing),
         // CMP(+:add 1 cycle if page boundary crossed), NZC
         OpCode::new(0xc9, "CMP", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xc5, "CMP", 2, 3, AddressingMode::ZeroPage),
@@ -156,6 +161,10 @@ lazy_static! {
         OpCode::new(0xf9, "SBC", 3, 4, AddressingMode::Absolute_Y), // 4+
         OpCode::new(0xe1, "SBC", 2, 6, AddressingMode::Indirect_X),
         OpCode::new(0xf1, "SBC", 2, 5, AddressingMode::Indirect_Y), // 5+
+        // Set
+        OpCode::new(0x38, "SEC", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xf8, "SED", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x78, "SEI", 1, 2, AddressingMode::NoneAddressing),
         // STA, none flag
         OpCode::new(0x85, "STA", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0x95, "STA", 2, 4, AddressingMode::ZeroPage_X),
