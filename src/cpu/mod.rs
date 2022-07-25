@@ -241,6 +241,16 @@ impl CPU {
                 0x24 | 0x2c => {
                     self.bit(&opcode.mode);
                 }
+                // 比较
+                0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 => {
+                    self.cmp(&opcode.mode);
+                }
+                0xe0 | 0xe4 | 0xec => {
+                    self.cpx(&opcode.mode);
+                }
+                0xc0 | 0xc4 | 0xcc => {
+                    self.cpy(&opcode.mode);
+                }
                 // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
@@ -562,6 +572,32 @@ impl CPU {
         } else {
             self.status.remove(CpuFlags::OVERFLOW);
         }
+    }
+
+    fn cmp(&mut self, mode: &AddressingMode) {
+        self.compare_update_nzc(self.register_a, mode);
+    }
+
+    fn cpx(&mut self, mode: &AddressingMode) {
+        self.compare_update_nzc(self.register_x, mode);
+    }
+
+    fn cpy(&mut self, mode: &AddressingMode) {
+        self.compare_update_nzc(self.register_y, mode);
+    }
+
+    fn compare_update_nzc(&mut self, lhs: u8, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        let result = lhs as u16 + (!value) as u16 + 1;
+
+        // CARRY
+        if result > 0xff {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        self.update_zero_and_negative_flags(result as u8);
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -950,5 +986,83 @@ mod tests {
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
+    }
+
+    #[test]
+    fn test_compare_1_8() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x01, // LDA #$01
+            0xc9, 0x08, // CMP #$08
+            0x00, // BRK
+        ]);
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_compare_8_1() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x08, // LDA #$08
+            0xc9, 0x01, // CMP #$01
+            0x00, // BRK
+        ]);
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_compare_1_1() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x01, // LDA #$01
+            0xc9, 0x01, // CMP #$01
+            0x00, // BRK
+        ]);
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_compare_1_255() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x01, // LDA #$01
+            0xc9, 0xff, // CMP #$ff
+            0x00, // BRK
+        ]);
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_compare_254_255() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0xfe, // LDA #$fe
+            0xc9, 0xff, // CMP #$ff
+            0x00, // BRK
+        ]);
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_compare_1_0() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![
+            0xa9, 0x01, // LDA #$01
+            0xc9, 0x00, // CMP #$00
+            0x00, // BRK
+        ]);
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::CARRY));
     }
 }

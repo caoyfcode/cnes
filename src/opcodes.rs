@@ -53,6 +53,23 @@ lazy_static! {
         OpCode::new(0x2c, "BIT", 3, 4, AddressingMode::Absolute),
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        // CMP(+:add 1 cycle if page boundary crossed), NZC
+        OpCode::new(0xc9, "CMP", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0xc5, "CMP", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0xd5, "CMP", 2, 4, AddressingMode::ZeroPage_X),
+        OpCode::new(0xcd, "CMP", 3, 4, AddressingMode::Absolute),
+        OpCode::new(0xdd, "CMP", 3, 4, AddressingMode::Absolute_X), // 4+
+        OpCode::new(0xd9, "CMP", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0xc1, "CMP", 2, 6, AddressingMode::Indirect_X),
+        OpCode::new(0xd1, "CMP", 2, 5, AddressingMode::Indirect_Y), // 5+
+        // CPX, NZC
+        OpCode::new(0xe0, "CPX", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0xe4, "CPX", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0xec, "CPX", 3, 4, AddressingMode::Absolute),
+        // CPY, NZC
+        OpCode::new(0xc0, "CPY", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0xc4, "CPY", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0xcc, "CPY", 3, 4, AddressingMode::Absolute),
         // decrement, NZ
         OpCode::new(0xc6, "DEC", 2, 5, AddressingMode::ZeroPage),
         OpCode::new(0xd6, "DEC", 2, 6, AddressingMode::ZeroPage_X),
