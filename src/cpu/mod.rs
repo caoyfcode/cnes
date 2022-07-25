@@ -356,6 +356,9 @@ impl CPU {
                 0x98 => {
                     self.tya();
                 }
+                0xea => { // nop
+                    // nothing
+                }
                 0x00 => { // BRK
                     return;  // just end
                 }

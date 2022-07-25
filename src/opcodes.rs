@@ -141,6 +141,8 @@ lazy_static! {
         OpCode::new(0x56, "LSR", 2, 6, AddressingMode::ZeroPage_X),
         OpCode::new(0x4e, "LSR", 3, 6, AddressingMode::Absolute),
         OpCode::new(0x5e, "LSR", 3, 7, AddressingMode::Absolute_X),
+        // NOP, none
+        OpCode::new(0xea, "NOP", 1, 2, AddressingMode::NoneAddressing),
         // ORA(+:add 1 cycle if page boundary crossed), NZ
         OpCode::new(0x09, "ORA", 2, 2, AddressingMode::Immediate),
         OpCode::new(0x05, "ORA", 2, 3, AddressingMode::ZeroPage),
