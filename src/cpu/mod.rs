@@ -237,6 +237,10 @@ impl CPU {
                 0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
                     self.eor(&opcode.mode);
                 }
+                // bit
+                0x24 | 0x2c => {
+                    self.bit(&opcode.mode);
+                }
                 // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
@@ -542,6 +546,22 @@ impl CPU {
         self.register_a = self.register_a ^ value;
 
         self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn bit(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.update_zero_and_negative_flags(self.register_a & value); // 仅仅用来设置 Z
+        if value & 0x80 == 0x80 { // N
+            self.status.insert(CpuFlags::NEGATIVE);
+        } else {
+            self.status.remove(CpuFlags::NEGATIVE);
+        }
+        if value & 0x40 == 0x40 { // V
+            self.status.insert(CpuFlags::OVERFLOW);
+        } else {
+            self.status.remove(CpuFlags::OVERFLOW);
+        }
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -914,5 +934,21 @@ mod tests {
         assert_eq!(cpu.mem_read(0x11), 0b1000_0000);
         assert_eq!(cpu.mem_read(0x12), 0b1111_0111);
         assert_eq!(cpu.mem_read(0x13), 0b1111_1110);
+    }
+
+    #[test]
+    fn test_bit() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0x24, 0x10, // BIT $10
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.register_a = 0b1000_1000;
+        cpu.mem_write(0x10, 0b1100_0001);
+        cpu.run();
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(cpu.status.contains(CpuFlags::OVERFLOW));
     }
 }
