@@ -227,6 +227,16 @@ impl CPU {
                 0x66 | 0x76 | 0x6e | 0x7e => {
                     self.ror(&opcode.mode);
                 }
+                // 逻辑
+                0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => {
+                    self.and(&opcode.mode);
+                }
+                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
+                    self.ora(&opcode.mode);
+                }
+                0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
+                    self.eor(&opcode.mode);
+                }
                 // 算术
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
                     self.adc(&opcode.mode);
@@ -508,6 +518,30 @@ impl CPU {
         }
         self.update_zero_and_negative_flags(result);
         result
+    }
+
+    fn and(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_a = self.register_a & value;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_a = self.register_a | value;
+
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn eor(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.register_a = self.register_a ^ value;
+
+        self.update_zero_and_negative_flags(self.register_a);
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
@@ -857,5 +891,28 @@ mod tests {
         assert_eq!(cpu.mem_read(0x10), 1);
         assert_eq!(cpu.mem_read(0x0200), 0b0000_0011);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_and_ora_eor() {
+        let mut cpu = CPU::new();
+        cpu.load(vec![
+            0xa9, 0x81, // LDA #$81 ; 0b1000_0001
+            0x25, 0x10, // AND $10
+            0x85, 0x11, // STA $11
+            0xa9, 0x61, // LDA #$61 ; 0b0110_0001
+            0x05, 0x10, // ORA $10
+            0x85, 0x12, // STA $12
+            0xa9, 0x68, // LDA #$69 ; 0b0110_1000
+            0x45, 0x10, // EOR $10
+            0x85, 0x13, // STA $13
+            0x00, // BRK
+        ]);
+        cpu.reset();
+        cpu.mem_write(0x10, 0b1001_0110);
+        cpu.run();
+        assert_eq!(cpu.mem_read(0x11), 0b1000_0000);
+        assert_eq!(cpu.mem_read(0x12), 0b1111_0111);
+        assert_eq!(cpu.mem_read(0x13), 0b1111_1110);
     }
 }

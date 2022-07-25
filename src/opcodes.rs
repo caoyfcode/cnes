@@ -34,14 +34,14 @@ lazy_static! {
         OpCode::new(0x61, "ADC", 2, 6, AddressingMode::Indirect_X),
         OpCode::new(0x71, "ADC", 2, 5, AddressingMode::Indirect_Y), // 5+
         // AND(+:add 1 cycle if page boundary crossed), NZ
-        // OpCode::new(0x29, "AND", 2, 2, AddressingMode::Immediate),
-        // OpCode::new(0x25, "AND", 2, 3, AddressingMode::ZeroPage),
-        // OpCode::new(0x35, "AND", 2, 4, AddressingMode::ZeroPage_X),
-        // OpCode::new(0x2d, "AND", 3, 4, AddressingMode::Absolute),
-        // OpCode::new(0x3d, "AND", 3, 4, AddressingMode::Absolute_X), // 4+
-        // OpCode::new(0x39, "AND", 3, 4, AddressingMode::Absolute_Y), // 4+
-        // OpCode::new(0x21, "AND", 2, 6, AddressingMode::Indirect_X),
-        // OpCode::new(0x31, "AND", 2, 5, AddressingMode::Indirect_Y), // 5+
+        OpCode::new(0x29, "AND", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0x25, "AND", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0x35, "AND", 2, 4, AddressingMode::ZeroPage_X),
+        OpCode::new(0x2d, "AND", 3, 4, AddressingMode::Absolute),
+        OpCode::new(0x3d, "AND", 3, 4, AddressingMode::Absolute_X), // 4+
+        OpCode::new(0x39, "AND", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0x21, "AND", 2, 6, AddressingMode::Indirect_X),
+        OpCode::new(0x31, "AND", 2, 5, AddressingMode::Indirect_Y), // 5+
         // ASL, NZC
         OpCode::new(0x0a, "ASL", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
         OpCode::new(0x06, "ASL", 2, 5, AddressingMode::ZeroPage),
@@ -50,6 +50,29 @@ lazy_static! {
         OpCode::new(0x1e, "ASL", 3, 7, AddressingMode::Absolute_X),
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        // decrement, NZ
+        OpCode::new(0xc6, "DEC", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0xd6, "DEC", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0xce, "DEC", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0xde, "DEC", 3, 7, AddressingMode::Absolute_X),
+        OpCode::new(0xca, "DEX", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x88, "DEY", 1, 2, AddressingMode::NoneAddressing),
+        // EOR(+:add 1 cycle if page boundary crossed), NZ
+        OpCode::new(0x49, "EOR", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0x45, "EOR", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0x55, "EOR", 2, 4, AddressingMode::ZeroPage_X),
+        OpCode::new(0x4d, "EOR", 3, 4, AddressingMode::Absolute),
+        OpCode::new(0x5d, "EOR", 3, 4, AddressingMode::Absolute_X), // 4+
+        OpCode::new(0x59, "EOR", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0x41, "EOR", 2, 6, AddressingMode::Indirect_X),
+        OpCode::new(0x51, "EOR", 2, 5, AddressingMode::Indirect_Y), // 5+
+        // increment, NZ
+        OpCode::new(0xe6, "INC", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(0xf6, "INC", 2, 6, AddressingMode::ZeroPage_X),
+        OpCode::new(0xee, "INC", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0xfe, "INC", 3, 7, AddressingMode::Absolute_X),
+        OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xc8, "INY", 1, 2, AddressingMode::NoneAddressing),
         // LDA(+:add 1 cycle if page boundary crossed), NZ
         OpCode::new(0xa9, "LDA", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xa5, "LDA", 2, 3, AddressingMode::ZeroPage),
@@ -77,20 +100,15 @@ lazy_static! {
         OpCode::new(0x56, "LSR", 2, 6, AddressingMode::ZeroPage_X),
         OpCode::new(0x4e, "LSR", 3, 6, AddressingMode::Absolute),
         OpCode::new(0x5e, "LSR", 3, 7, AddressingMode::Absolute_X),
-        // decrement, NZ
-        OpCode::new(0xc6, "DEC", 2, 5, AddressingMode::ZeroPage),
-        OpCode::new(0xd6, "DEC", 2, 6, AddressingMode::ZeroPage_X),
-        OpCode::new(0xce, "DEC", 3, 6, AddressingMode::Absolute),
-        OpCode::new(0xde, "DEC", 3, 7, AddressingMode::Absolute_X),
-        OpCode::new(0xca, "DEX", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0x88, "DEY", 1, 2, AddressingMode::NoneAddressing),
-        // increment, NZ
-        OpCode::new(0xe6, "INC", 2, 5, AddressingMode::ZeroPage),
-        OpCode::new(0xf6, "INC", 2, 6, AddressingMode::ZeroPage_X),
-        OpCode::new(0xee, "INC", 3, 6, AddressingMode::Absolute),
-        OpCode::new(0xfe, "INC", 3, 7, AddressingMode::Absolute_X),
-        OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
-        OpCode::new(0xc8, "INY", 1, 2, AddressingMode::NoneAddressing),
+        // ORA(+:add 1 cycle if page boundary crossed), NZ
+        OpCode::new(0x09, "ORA", 2, 2, AddressingMode::Immediate),
+        OpCode::new(0x05, "ORA", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(0x15, "ORA", 2, 4, AddressingMode::ZeroPage_X),
+        OpCode::new(0x0d, "ORA", 3, 4, AddressingMode::Absolute),
+        OpCode::new(0x1d, "ORA", 3, 4, AddressingMode::Absolute_X), // 4+
+        OpCode::new(0x19, "ORA", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0x01, "ORA", 2, 6, AddressingMode::Indirect_X),
+        OpCode::new(0x11, "ORA", 2, 5, AddressingMode::Indirect_Y), // 5+
         // stack push, none
         OpCode::new(0x48, "PHA", 1, 3, AddressingMode::NoneAddressing),
         OpCode::new(0x08, "PHP", 1, 3, AddressingMode::NoneAddressing),
