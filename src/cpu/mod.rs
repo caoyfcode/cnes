@@ -258,6 +258,47 @@ impl CPU {
                 0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
                     self.sbc(&opcode.mode);
                 }
+                // 分支
+                0x90 => { // BCC
+                    if !self.status.contains(CpuFlags::CARRY) {
+                        self.branch();
+                    }
+                }
+                0xb0 => { // BCS
+                    if self.status.contains(CpuFlags::CARRY) {
+                        self.branch();
+                    }
+                }
+                0xf0 => { // BEQ
+                    if self.status.contains(CpuFlags::ZERO) {
+                        self.branch();
+                    }
+                }
+                0x30 => { // BMI
+                    if self.status.contains(CpuFlags::NEGATIVE) {
+                        self.branch();
+                    }
+                }
+                0xd0 => { // BNE
+                    if !self.status.contains(CpuFlags::ZERO) {
+                        self.branch();
+                    }
+                }
+                0x10 => { // BPL
+                    if !self.status.contains(CpuFlags::NEGATIVE) {
+                        self.branch();
+                    }
+                }
+                0x50 => { // BVC
+                    if !self.status.contains(CpuFlags::OVERFLOW) {
+                        self.branch();
+                    }
+                }
+                0x70 => { // BVS
+                    if self.status.contains(CpuFlags::OVERFLOW) {
+                        self.branch();
+                    }
+                }
                 // 状态寄存器
                 0x18 => {
                     self.clc();
@@ -661,6 +702,13 @@ impl CPU {
         }
         self.update_zero_and_negative_flags(result);
         self.register_a = result;
+    }
+
+    fn branch(&mut self) {
+        let offset = self.mem_read(self.program_counter);
+        self.program_counter = self.program_counter
+            .wrapping_add(1)
+            .wrapping_add(offset as u16);
     }
 
     fn clc(&mut self) {

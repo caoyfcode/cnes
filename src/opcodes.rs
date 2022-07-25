@@ -48,11 +48,22 @@ lazy_static! {
         OpCode::new(0x16, "ASL", 2, 6, AddressingMode::ZeroPage_X),
         OpCode::new(0x0e, "ASL", 3, 6, AddressingMode::Absolute),
         OpCode::new(0x1e, "ASL", 3, 7, AddressingMode::Absolute_X),
+        // branch(A branch not taken requires two machine cycles. Add one if the branch is taken and add one more if the branch crosses a page boundary.)
+        OpCode::new(0x90, "BCC", 2, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xb0, "BCS", 2, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xf0, "BEQ", 2, 2, AddressingMode::NoneAddressing),
         // BIT, NVZ
         OpCode::new(0x24, "BIT", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0x2c, "BIT", 3, 4, AddressingMode::Absolute),
+        // branch
+        OpCode::new(0x30, "BMI", 2, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0xd0, "BNE", 2, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x10, "BPL", 2, 2, AddressingMode::NoneAddressing),
         // BRK
         OpCode::new(0x00, "BRK", 1, 7, AddressingMode::NoneAddressing),
+        // branch
+        OpCode::new(0x50, "BVC", 2, 2, AddressingMode::NoneAddressing),
+        OpCode::new(0x70, "BVS", 2, 2, AddressingMode::NoneAddressing),
         // Clear
         OpCode::new(0x18, "CLC", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xd8, "CLD", 1, 2, AddressingMode::NoneAddressing),
