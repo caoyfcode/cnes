@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use bitflags::bitflags;
-use crate::opcodes;
+use crate::{opcodes, bus::Bus};
 
 /// # 寻址模式
 /// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
@@ -92,7 +92,7 @@ pub struct CPU {
     pub status: CpuFlags,
     pub program_counter: u16,
     pub stack_pointer: u8,  // 指向空位置
-    memory: [u8; 0xFFFF],
+    pub bus: Bus, // 总线(连接RAM)
 }
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
@@ -100,11 +100,19 @@ const STACK_RESET: u8 = 0xfd;
 
 impl Mem for CPU {
     fn mem_read(&self, addr: u16) -> u8 {
-        self.memory[addr as usize]
+        self.bus.mem_read(addr)
     }
 
     fn mem_write(&mut self, addr: u16, data: u8) {
-        self.memory[addr as usize] = data;
+        self.bus.mem_write(addr, data);
+    }
+
+    fn mem_read_u16(&self, addr: u16) -> u16 {
+        self.bus.mem_read_u16(addr)
+    }
+
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
+        self.bus.mem_write_u16(addr, data);
     }
 }
 
@@ -117,7 +125,7 @@ impl CPU {
             status: CpuFlags::from_bits_truncate(0b100100),
             program_counter: 0,
             stack_pointer: STACK_RESET,
-            memory: [0; 0xFFFF],
+            bus: Bus::new(),
         }
     }
 
@@ -144,7 +152,9 @@ impl CPU {
     /// 2. 设置程序开始地址
     pub fn load(&mut self, program: Vec<u8>) {
         // 为了运行 snake game, 将 0x8000 改为 0x0600
-        self.memory[0x0600 .. (0x0600 + program.len())].copy_from_slice(&program[..]);
+        for i in 0..(program.len() as u16) {
+            self.mem_write(0x0600 + i, program[i as usize]);
+        }
         self.mem_write_u16(0xFFFC, 0x0600);
     }
 
