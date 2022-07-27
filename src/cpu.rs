@@ -141,9 +141,17 @@ impl CPU {
     }
 
     pub fn run(&mut self) {
+        self.run_with_callback(|_| {});
+    }
+
+    pub fn run_with_callback<F>(&mut self, mut callback: F)
+    where
+        F: FnMut(&mut CPU),
+    {
         let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
         loop {
+            callback(self);
             let code = self.mem_read(self.program_counter);
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
@@ -365,7 +373,7 @@ impl CPU {
                 _ => todo!()
             }
 
-            if program_counter_state == self.program_counter { // 分支跳转可能改变 PC
+            if program_counter_state == self.program_counter { // 没有进行跳转则转至下一条指令
                 self.program_counter += (opcode.len - 1) as u16;
             }
         }
@@ -773,7 +781,7 @@ impl CPU {
     }
 
     fn branch(&mut self) {
-        let offset = self.mem_read(self.program_counter);
+        let offset = self.mem_read(self.program_counter) as i8; // branch 有符号
         self.program_counter = self.program_counter
             .wrapping_add(1)
             .wrapping_add(offset as u16);
