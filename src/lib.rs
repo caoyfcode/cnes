@@ -1,4 +1,4 @@
-mod cpu;
+pub mod cpu;
 mod opcodes;
 
 #[macro_use]
