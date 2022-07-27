@@ -1,4 +1,4 @@
-use cnes::cpu::CPU;
+use cnes::cpu::{CPU, Mem};
 use rand::Rng;
 use sdl2::EventPump;
 use sdl2::event::Event;

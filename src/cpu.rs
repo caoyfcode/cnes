@@ -63,6 +63,26 @@ bitflags! {
     }
 }
 
+pub trait Mem {
+    fn mem_read(&self, addr: u16) -> u8;
+    fn mem_write(&mut self, addr: u16, data: u8);
+
+    /// 按照 Little-Endian 读取 2 字节
+    fn mem_read_u16(&self, addr: u16) -> u16 {
+        let lo = self.mem_read(addr) as u16;
+        let hi = self.mem_read(addr + 1) as u16;
+        (hi << 8) | lo
+    }
+
+    /// 按照 Little-Endian 写 2 字节
+    fn mem_write_u16(&mut self, addr: u16, data: u16) {
+        let hi = (data >> 8) as u8;
+        let lo = (data & 0xff) as u8;
+        self.mem_write(addr, lo);
+        self.mem_write(addr + 1, hi);
+    }
+}
+
 /// # CPU struct
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
 pub struct CPU {
@@ -78,6 +98,16 @@ pub struct CPU {
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
 const STACK_RESET: u8 = 0xfd;
 
+impl Mem for CPU {
+    fn mem_read(&self, addr: u16) -> u8 {
+        self.memory[addr as usize]
+    }
+
+    fn mem_write(&mut self, addr: u16, data: u8) {
+        self.memory[addr as usize] = data;
+    }
+}
+
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -89,29 +119,6 @@ impl CPU {
             stack_pointer: STACK_RESET,
             memory: [0; 0xFFFF],
         }
-    }
-
-    pub fn mem_read(&self, addr: u16) -> u8 {
-        self.memory[addr as usize]
-    }
-
-    pub fn mem_write(&mut self, addr: u16, data: u8) {
-        self.memory[addr as usize] = data;
-    }
-
-    /// 按照 Little-Endian 读取 2 字节
-    fn mem_read_u16(&self, addr: u16) -> u16 {
-        let lo = self.mem_read(addr) as u16;
-        let hi = self.mem_read(addr + 1) as u16;
-        (hi << 8) | lo
-    }
-
-    /// 按照 Little-Endian 写 2 字节
-    fn mem_write_u16(&mut self, addr: u16, data: u16) {
-        let hi = (data >> 8) as u8;
-        let lo = (data & 0xff) as u8;
-        self.mem_write(addr, lo);
-        self.mem_write(addr + 1, hi);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
