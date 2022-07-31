@@ -1,4 +1,4 @@
-use crate::cpu::Mem;
+use crate::{cpu::Mem, cartridge::Rom};
 
 //  _______________ $10000  _______________
 // | PRG-ROM       |       |               |
@@ -34,13 +34,23 @@ const PPU_REGISTERS_MIRRORS_END: u16 = 0x3fff; // PPU Registers 映射截止
 
 pub struct Bus {
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
+    rom: Rom,
 }
 
 impl Bus {
-    pub fn new() -> Self {
+    pub fn new(rom: Rom) -> Self {
         Bus {
-            cpu_vram: [0; 2048]
+            cpu_vram: [0; 2048],
+            rom,
         }
+    }
+
+    fn read_prg_rom(&self, addr: u16) -> u8 {
+        let mut idx = addr - 0x8000;
+        if self.rom.prg_rom.len() == 0x4000 && idx >= 0x4000 { // 仅仅有 lower bank
+            idx = idx % 0x4000;
+        }
+        self.rom.prg_rom[idx as usize]
     }
 }
 
@@ -54,6 +64,9 @@ impl Mem for Bus {
             PPU_REGISTERS..=PPU_REGISTERS_MIRRORS_END => { // PPU Registers
                 let _mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为 PPU Registers
                 todo!("PPU is not supported yet")
+            }
+            0x8000..=0xffff => { // PRG ROM
+                self.read_prg_rom(addr)
             }
             _ => {
                 println!("Ignoring mem access at {}", addr);
@@ -71,6 +84,9 @@ impl Mem for Bus {
             PPU_REGISTERS..=PPU_REGISTERS_MIRRORS_END => { // I/O Registers
                 let _mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为I/O Registers
                 todo!("PPU is not supported yet")
+            }
+            0x8000..=0xffff => { // PRG ROM
+                panic!("Attempt to write to Cartridge ROM space")
             }
             _ => {
                 println!("Ignoring mem access at {}", addr);

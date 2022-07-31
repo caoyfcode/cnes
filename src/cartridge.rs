@@ -73,3 +73,137 @@ impl Rom {
         })
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+
+    use super::*;
+
+    struct TestRom {
+        header: Vec<u8>,
+        trainer: Option<Vec<u8>>,
+        prg_rom: Vec<u8>,
+        chr_rom: Vec<u8>,
+    }
+
+    fn create_rom(rom: TestRom) -> Vec<u8> {
+        let mut result = Vec::with_capacity(
+            rom.header.len()
+                + rom.trainer.as_ref().map_or(0, |t| t.len())
+                + rom.prg_rom.len()
+                + rom.chr_rom.len(),
+        );
+
+        result.extend(&rom.header);
+        if let Some(t) = rom.trainer {
+            result.extend(t);
+        }
+        result.extend(&rom.prg_rom);
+        result.extend(&rom.chr_rom);
+
+        result
+    }
+
+    pub fn test_rom() -> Rom {
+        let test_rom = create_rom(TestRom {
+            header: vec![
+                0x4E, 0x45, 0x53, 0x1A, 0x02, 0x01, 0x31, 00, 00, 00, 00, 00, 00, 00, 00, 00,
+            ],
+            trainer: None,
+            prg_rom: vec![1; 2 * PRG_ROM_PAGE_SIZE],
+            chr_rom: vec![2; 1 * CHR_ROM_PAGE_SIZE],
+        });
+
+        Rom::new(&test_rom).unwrap()
+    }
+
+    pub fn test_rom_with_2_bank_prg(prg: Vec<u8>) -> Rom {
+        if prg.len() > 2 * PRG_ROM_PAGE_SIZE {
+            panic!("PRG bigger than 2 bank")
+        }
+        let mut test_rom = TestRom {
+            header: vec![
+                0x4E, 0x45, 0x53, 0x1A, 0x02, 0x01, 0x31, 00, 00, 00, 00, 00, 00, 00, 00, 00,
+            ],
+            trainer: None,
+            prg_rom: vec![1; 2 * PRG_ROM_PAGE_SIZE],
+            chr_rom: vec![2; 1 * CHR_ROM_PAGE_SIZE],
+        };
+        test_rom.prg_rom[0..prg.len()].copy_from_slice(&prg);
+        test_rom.prg_rom[0xfffc - 0x8000] = 0x00; // 程序起始地址
+        test_rom.prg_rom[0xfffc - 0x8000 + 1] = 0x80;
+        let test_rom = create_rom(test_rom);
+
+        Rom::new(&test_rom).unwrap()
+    }
+
+    #[test]
+    fn test() {
+        let test_rom = create_rom(TestRom {
+            header: vec![
+                0x4E, 0x45, 0x53, 0x1A, 0x02, 0x01, 0x31, 00, 00, 00, 00, 00, 00, 00, 00, 00,
+            ],
+            trainer: None,
+            prg_rom: vec![1; 2 * PRG_ROM_PAGE_SIZE],
+            chr_rom: vec![2; 1 * CHR_ROM_PAGE_SIZE],
+        });
+
+        let rom: Rom = Rom::new(&test_rom).unwrap();
+
+        assert_eq!(rom.chr_rom, vec!(2; 1 * CHR_ROM_PAGE_SIZE));
+        assert_eq!(rom.prg_rom, vec!(1; 2 * PRG_ROM_PAGE_SIZE));
+        assert_eq!(rom.mapper, 3);
+        assert_eq!(rom.screen_mirroring, Mirroring::VERTICAL);
+    }
+
+    #[test]
+    fn test_with_trainer() {
+        let test_rom = create_rom(TestRom {
+            header: vec![
+                0x4E,
+                0x45,
+                0x53,
+                0x1A,
+                0x02,
+                0x01,
+                0x31 | 0b100,
+                00,
+                00,
+                00,
+                00,
+                00,
+                00,
+                00,
+                00,
+                00,
+            ],
+            trainer: Some(vec![0; 512]),
+            prg_rom: vec![1; 2 * PRG_ROM_PAGE_SIZE],
+            chr_rom: vec![2; 1 * CHR_ROM_PAGE_SIZE],
+        });
+
+        let rom: Rom = Rom::new(&test_rom).unwrap();
+
+        assert_eq!(rom.chr_rom, vec!(2; 1 * CHR_ROM_PAGE_SIZE));
+        assert_eq!(rom.prg_rom, vec!(1; 2 * PRG_ROM_PAGE_SIZE));
+        assert_eq!(rom.mapper, 3);
+        assert_eq!(rom.screen_mirroring, Mirroring::VERTICAL);
+    }
+
+    #[test]
+    fn test_nes2_is_not_supported() {
+        let test_rom = create_rom(TestRom {
+            header: vec![
+                0x4E, 0x45, 0x53, 0x1A, 0x01, 0x01, 0x31, 0x8, 00, 00, 00, 00, 00, 00, 00, 00,
+            ],
+            trainer: None,
+            prg_rom: vec![1; 1 * PRG_ROM_PAGE_SIZE],
+            chr_rom: vec![2; 1 * CHR_ROM_PAGE_SIZE],
+        });
+        let rom = Rom::new(&test_rom);
+        match rom {
+            Result::Ok(_) => assert!(false, "should not load rom"),
+            Result::Err(str) => assert_eq!(str, "NES2.0 format is not supported"),
+        }
+    }
+}
