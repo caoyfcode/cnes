@@ -400,35 +400,41 @@ impl CPU {
     fn get_operand_address(&self, mode: &AddressingMode) -> u16 {
         match mode {
             AddressingMode::Immediate => self.program_counter,
-            AddressingMode::ZeroPage => self.mem_read(self.program_counter) as u16,
+            _ => self.get_absolute_address(mode, self.program_counter),
+        }
+    }
+
+    pub fn get_absolute_address(&self, mode: &AddressingMode, addr: u16) -> u16 {
+        match mode {
+            AddressingMode::ZeroPage => self.mem_read(addr) as u16,
             AddressingMode::ZeroPage_X => {
-                let pos = self.mem_read(self.program_counter);
+                let pos = self.mem_read(addr);
                 pos.wrapping_add(self.register_x) as u16
             }
             AddressingMode::ZeroPage_Y => {
-                let pos = self.mem_read(self.program_counter);
+                let pos = self.mem_read(addr);
                 pos.wrapping_add(self.register_y) as u16
             }
-            AddressingMode::Absolute => self.mem_read_u16(self.program_counter),
+            AddressingMode::Absolute => self.mem_read_u16(addr),
             AddressingMode::Absolute_X => {
-                let pos = self.mem_read_u16(self.program_counter);
+                let pos = self.mem_read_u16(addr);
                 pos.wrapping_add(self.register_x as u16)
             }
             AddressingMode::Absolute_Y => {
-                let pos = self.mem_read_u16(self.program_counter);
+                let pos = self.mem_read_u16(addr);
                 pos.wrapping_add(self.register_y as u16)
             }
             AddressingMode::Indirect_X => {
-                let base = self.mem_read(self.program_counter);
+                let base = self.mem_read(addr);
                 let ptr = base.wrapping_add(self.register_x) as u16;
                 self.mem_read_u16(ptr)
             }
             AddressingMode::Indirect_Y => {
-                let ptr = self.mem_read(self.program_counter);
+                let ptr = self.mem_read(addr);
                 let addr_base = self.mem_read_u16(ptr as u16);
                 addr_base.wrapping_add(self.register_y as u16)
             }
-            AddressingMode::NoneAddressing => {
+            _ => {
                 panic!("mode {:?} is not supported", mode);
             }
         }

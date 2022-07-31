@@ -7,6 +7,7 @@ const CHR_ROM_PAGE_SIZE: usize = 8 * 1024; // INES 格式中 CHR ROM 为若干�
 /// - Vertical
 /// - 4 Screen
 #[derive(Debug, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum Mirroring {
     VERTICAL,
     HORIZONTAL,
