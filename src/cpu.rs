@@ -174,7 +174,7 @@ impl CPU {
             self.program_counter += 1;
             let program_counter_state = self.program_counter;
 
-            let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
+            let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
 
             match code {
                 // load/store
@@ -426,12 +426,16 @@ impl CPU {
             }
             AddressingMode::Indirect_X => {
                 let base = self.mem_read(addr);
-                let ptr = base.wrapping_add(self.register_x) as u16;
-                self.mem_read_u16(ptr)
+                let ptr = base.wrapping_add(self.register_x);
+                let lo = self.mem_read(ptr as u16) as u16;
+                let hi = self.mem_read(ptr.wrapping_add(1) as u16) as u16; // 不能超过 ZeroPage
+                (hi << 8) | lo
             }
             AddressingMode::Indirect_Y => {
                 let ptr = self.mem_read(addr);
-                let addr_base = self.mem_read_u16(ptr as u16);
+                let lo = self.mem_read(ptr as u16) as u16;
+                let hi = self.mem_read(ptr.wrapping_add(1) as u16) as u16; // 不能超过 ZeroPage
+                let addr_base = (hi << 8) | lo;
                 addr_base.wrapping_add(self.register_y as u16)
             }
             _ => {

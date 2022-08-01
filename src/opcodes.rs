@@ -110,10 +110,10 @@ lazy_static! {
         OpCode::new(0xe8, "INX", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xc8, "INY", 1, 2, AddressingMode::NoneAddressing),
         // JMP, none
-        OpCode::new(0x4c, "JMP", 3, 3, AddressingMode::Absolute),
+        OpCode::new(0x4c, "JMP", 3, 3, AddressingMode::NoneAddressing), // Absolute
         OpCode::new(0x6c, "JMP", 3, 5, AddressingMode::NoneAddressing), // Indirect
         // JSR(jump to subroutine), none
-        OpCode::new(0x20, "JSR", 3, 6, AddressingMode::Absolute),
+        OpCode::new(0x20, "JSR", 3, 6, AddressingMode::NoneAddressing), // Absolute
         // LDA(+:add 1 cycle if page boundary crossed), NZ
         OpCode::new(0xa9, "LDA", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xa5, "LDA", 2, 3, AddressingMode::ZeroPage),
@@ -134,7 +134,7 @@ lazy_static! {
         OpCode::new(0xa4, "LDY", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0xb4, "LDY", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0xac, "LDY", 3, 4, AddressingMode::Absolute),
-        OpCode::new(0xbc, "LDY", 3, 4, AddressingMode::Absolute_Y), // 4+
+        OpCode::new(0xbc, "LDY", 3, 4, AddressingMode::Absolute_X), // 4+
         // LSR, NZC
         OpCode::new(0x4a, "LSR", 1, 2, AddressingMode::NoneAddressing), // Accumulator mode
         OpCode::new(0x46, "LSR", 2, 5, AddressingMode::ZeroPage),

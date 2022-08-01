@@ -6,7 +6,7 @@ use crate::{opcodes, cpu::{CPU, Mem, AddressingMode}};
 pub fn trace(cpu: &CPU) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
     let code = cpu.mem_read(cpu.program_counter);
-    let opcode = opcodes.get(&code).expect(&format!("OpCode {:x} is not recognized", code));
+    let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
 
     let mut hex_dump = vec![code];
 
@@ -90,8 +90,8 @@ pub fn trace(cpu: &CPU) -> String {
                         } else {
                             cpu.mem_read_u16(operand)
                         };
-                        format!("({:04x}) = {:04x}", operand, target)
-                    } else { // 目前暂无
+                        format!("(${:04x}) = {:04x}", operand, target)
+                    } else { // jmp absolute or jsr(absolute)
                         format!("${:04x}", operand)
                     }
                 }
