@@ -43,7 +43,7 @@ impl Rom {
     /// + (控制字节绝对是否存在)512 字节 trainer
     /// + PRG ROM
     /// + CHR ROM
-    fn new(raw: &Vec<u8>) ->Result<Rom, String> {
+    pub fn new(raw: &Vec<u8>) ->Result<Rom, String> {
         // 16 字节 NES header
         if &raw[0..4] != NES_TAG { // 4 字节: "NES^Z"
             return Err("File is not in iNES file format".to_string());
