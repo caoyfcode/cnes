@@ -245,7 +245,7 @@ lazy_static! {
         OpCode::new(0x7b, "*RRA", 3, 7, AddressingMode::Absolute_Y),
         OpCode::new(0x63, "*RRA", 2, 8, AddressingMode::Indirect_X),
         OpCode::new(0x73, "*RRA", 2, 8, AddressingMode::Indirect_Y),
-        // SAX, NZ
+        // SAX, None
         OpCode::new(0x87, "*SAX", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0x97, "*SAX", 2, 4, AddressingMode::ZeroPage_Y),
         OpCode::new(0x83, "*SAX", 2, 6, AddressingMode::Indirect_X),
@@ -257,7 +257,7 @@ lazy_static! {
         OpCode::new(0xbf, "*LAX", 3, 4, AddressingMode::Absolute_Y), // 4+
         OpCode::new(0xa3, "*LAX", 2, 6, AddressingMode::Indirect_X),
         OpCode::new(0xb3, "*LAX", 2, 5, AddressingMode::Indirect_Y), // 5+
-        // DCP, C
+        // DCP, NZC
         OpCode::new(0xc7, "*DCP", 2, 5, AddressingMode::ZeroPage),
         OpCode::new(0xd7, "*DCP", 2, 6, AddressingMode::ZeroPage_X),
         OpCode::new(0xcf, "*DCP", 3, 6, AddressingMode::Absolute),
@@ -280,7 +280,7 @@ lazy_static! {
         OpCode::new(0x4b, "*ALR", 2, 2, AddressingMode::Immediate),
         // ARR, NVZC
         OpCode::new(0x6b, "*ARR", 2, 2, AddressingMode::Immediate),
-        // XAA, highly unstable (results are not predictable on some machines)
+        // XAA, NZ, highly unstable (results are not predictable on some machines)
         OpCode::new(0x8b, "*XAA", 2, 2, AddressingMode::Immediate),
         // LAX, NZ, highly unstable (results are not predictable on some machines)
         OpCode::new(0xab, "*LAX", 2, 2, AddressingMode::Immediate),
@@ -288,18 +288,18 @@ lazy_static! {
         OpCode::new(0xcb, "*AXS", 2, 2, AddressingMode::Immediate),
         // SBC, NVZC
         OpCode::new(0xeb, "*SBC", 2, 2, AddressingMode::Immediate),
-        // AHX, unstable in certain matters
+        // AHX, None, unstable in certain matters
         OpCode::new(0x9f, "*AHX", 3, 5, AddressingMode::Absolute_Y),
         OpCode::new(0x93, "*AHX", 2, 6, AddressingMode::Indirect_Y),
-        // SHY, unstable in certain matters
+        // SHY, None, unstable in certain matters
         OpCode::new(0x9c, "*SHY", 3, 5, AddressingMode::Absolute_X),
-        // SHX, unstable in certain matters
+        // SHX, None, unstable in certain matters
         OpCode::new(0x9e, "*SHX", 3, 5, AddressingMode::Absolute_Y),
-        // TAS, unstable in certain matters
+        // TAS, None, unstable in certain matters
         OpCode::new(0x9b, "*TAS", 3, 5, AddressingMode::Absolute_Y),
         // LAS, NZ
         OpCode::new(0xbb, "*LAS", 3, 4, AddressingMode::Absolute_Y), // 4+
-        // KIL
+        // KIL, None
         OpCode::new(0x02, "*KIL", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0x12, "*KIL", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0x22, "*KIL", 1, 2, AddressingMode::NoneAddressing),
@@ -312,14 +312,14 @@ lazy_static! {
         OpCode::new(0xb2, "*KIL", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xd2, "*KIL", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xf2, "*KIL", 1, 2, AddressingMode::NoneAddressing),
-        // NOP
+        // NOP, None
         OpCode::new(0x1a, "*NOP", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0x3a, "*NOP", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0x5a, "*NOP", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0x7a, "*NOP", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xda, "*NOP", 1, 2, AddressingMode::NoneAddressing),
         OpCode::new(0xfa, "*NOP", 1, 2, AddressingMode::NoneAddressing),
-        // DOP, double NOP, argument has no signifi-cance
+        // DOP, None, double NOP, argument has no signifi-cance
         OpCode::new(0x04, "*NOP", 2, 3, AddressingMode::ZeroPage),
         OpCode::new(0x14, "*NOP", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0x34, "*NOP", 2, 4, AddressingMode::ZeroPage_X),
@@ -334,7 +334,7 @@ lazy_static! {
         OpCode::new(0xd4, "*NOP", 2, 4, AddressingMode::ZeroPage_X),
         OpCode::new(0xe2, "*NOP", 2, 2, AddressingMode::Immediate),
         OpCode::new(0xf4, "*NOP", 2, 4, AddressingMode::ZeroPage_X),
-        // TOP, tripple NOP, argument has no signifi-cance
+        // TOP, None, tripple NOP, argument has no signifi-cance
         OpCode::new(0x0c, "*NOP", 3, 4, AddressingMode::Absolute),
         OpCode::new(0x1c, "*NOP", 3, 4, AddressingMode::Absolute_X),
         OpCode::new(0x3c, "*NOP", 3, 4, AddressingMode::Absolute_X),
