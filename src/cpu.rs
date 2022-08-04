@@ -388,7 +388,73 @@ impl CPU {
                 0x00 => { // BRK
                     return;  // just end
                 }
-                _ => todo!()
+                // unofficial
+                0x07 | 0x17 | 0x0f | 0x1f | 0x1b | 0x03 | 0x13 => {
+                    self.slo(&opcode.mode);
+                }
+                0x27 | 0x37 | 0x2f | 0x3f | 0x3b | 0x23 | 0x33 => {
+                    self.rla(&opcode.mode);
+                }
+                0x47 | 0x57 | 0x4f | 0x5f | 0x5b | 0x43 | 0x53 => {
+                    self.sre(&opcode.mode);
+                }
+                0x67 | 0x77 | 0x6f | 0x7f | 0x7b | 0x63 | 0x73 => {
+                    self.rra(&opcode.mode);
+                }
+                0x87 | 0x97 | 0x83 | 0x8f => {
+                    self.sax(&opcode.mode);
+                }
+                0xa7 | 0xb7 | 0xaf | 0xbf | 0xa3 | 0xb3 => {
+                    self.lax(&opcode.mode);
+                }
+                0xc7 | 0xd7 | 0xcf | 0xdf | 0xdb | 0xc3 | 0xd3 => {
+                    self.dcp(&opcode.mode);
+                }
+                0xe7 | 0xf7 | 0xef | 0xff | 0xfb | 0xe3 | 0xf3 => {
+                    self.isc(&opcode.mode);
+                }
+                0x0b | 0x2b => {
+                    self.anc(&opcode.mode);
+                }
+                0x4b => {
+                    self.alr(&opcode.mode);
+                }
+                0x6b => {
+                    self.arr(&opcode.mode);
+                }
+                0x8b => {
+                    self.xaa(&opcode.mode);
+                }
+                0xab => {
+                    self.lax(&opcode.mode);
+                }
+                0xcb => {
+                    self.axs(&opcode.mode);
+                }
+                0xeb => {
+                    self.sbc(&opcode.mode);
+                }
+                0x9f | 0x93 => {
+                    self.ahx(&opcode.mode);
+                }
+                0x9c => {
+                    self.shy(&opcode.mode);
+                }
+                0x9e => {
+                    self.shx(&opcode.mode);
+                }
+                0x9b => {
+                    self.tas(&opcode.mode);
+                }
+                0xbb => {
+                    self.las(&opcode.mode);
+                }
+                0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xb2 | 0xd2 | 0xf2 => { // KIL
+                    todo!("KIL todo");
+                }
+                _ => { // NOP, DOP, TOP
+                    // nothing
+                }
             }
 
             if program_counter_state == self.program_counter { // 没有进行跳转则转至下一条指令
@@ -889,6 +955,192 @@ impl CPU {
         } else {
             self.status.remove(CpuFlags::NEGATIVE);
         }
+    }
+
+    // unofficial
+
+    // Shift left one bit in memory, then OR accumulator with memory.
+    fn slo(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.arithmetic_shift_left_update_nzc(data);
+        self.register_a = self.register_a | data;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    // Rotate one bit left in memory, then AND accumulator with memory
+    fn rla(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.rotate_left_through_carry_update_nzc(data);
+        self.register_a = self.register_a & data;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    // Shift right one bit in memory, then EOR accumulator with memory.
+    fn sre(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.logical_shift_right_update_nzc(data);
+        self.register_a = self.register_a ^ data;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    // Rotate one bit right in memory, then add memory to accumulator (with carry).
+    fn rra(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let data = self.rotate_right_through_carry_update_nzc(data);
+        // TODO ?加法是用新的 carrry 还是旧的
+        self.add_to_a_with_carry_update_nvzc(data);
+    }
+
+    // AND X register with accumulator and store result in memory.
+    fn sax(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.register_a & self.register_x;
+        self.mem_write(addr, result);
+    }
+
+    // Load accumulator and X register with memory.
+    fn lax(&mut self, mode: &AddressingMode) {
+        self.lda(mode);
+        self.tax();
+    }
+
+    // Subtract 1 from memory (without borrow).
+    // 通过 A - result 的结果改变 NZC
+    fn dcp(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.mem_read(addr).wrapping_sub(1);
+        self.mem_write(addr, result);
+
+        if self.register_a >= result {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        self.update_zero_and_negative_flags(self.register_a.wrapping_sub(result));
+    }
+
+    // Increase memory by one, then subtract memory from accu-mulator (with borrow).
+    fn isc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.mem_read(addr).wrapping_add(1);
+        self.mem_write(addr, result);
+
+        // 原理见 fn sbc 注释
+        self.add_to_a_with_carry_update_nvzc(!result);
+    }
+
+    // AND byte with accumulator. If result is negative then carry is set.
+    fn anc(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+        if self.status.contains(CpuFlags::NEGATIVE) {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+    }
+
+    // AND byte with accumulator, then shift right one bit in accumulator.
+    fn alr(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+        self.lsr_a();
+    }
+
+    // AND byte with accumulator, then rotate one bit right in accumulator and
+    // check bit 5 and 6:
+    // If both bits are 1: set C, clear V.
+    // If both bits are 0: clear C and V.
+    // If only bit 5 is 1: set V, clear C.
+    // If only bit 6 is 1: set C and V.
+    fn arr(&mut self, mode: &AddressingMode) {
+        self.and(mode);
+        self.ror_a();
+        let bit5 = self.register_a & 0b0010_0000 == 0b0010_0000;
+        let bit6 = self.register_a & 0b0100_0000 == 0b0100_0000;
+        match (bit5, bit6) {
+            (true, true) => {
+                self.status.insert(CpuFlags::CARRY);
+                self.status.remove(CpuFlags::OVERFLOW);
+            }
+            (false, false) => {
+                self.status.remove(CpuFlags::CARRY);
+                self.status.remove(CpuFlags::OVERFLOW);
+            }
+            (true, false) => {
+                self.status.remove(CpuFlags::CARRY);
+                self.status.insert(CpuFlags::OVERFLOW);
+            }
+            (false, true) => {
+                self.status.insert(CpuFlags::CARRY);
+                self.status.insert(CpuFlags::OVERFLOW);
+            }
+        }
+    }
+
+    // 	A := X & #{imm}
+    fn xaa(&mut self, mode: &AddressingMode) {
+        self.txa();
+        self.and(mode);
+    }
+
+    // AND X register with accumulator and store result in X register, then subtract byte from X register (without borrow).
+    fn axs(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        self.register_x = self.register_x & self.register_a;
+
+        if self.register_x >= data {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        self.register_x = self.register_x.wrapping_sub(data);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    // {adr} := A & X & High(adr)
+    fn ahx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.register_a & self.register_x & (addr >> 8) as u8;
+        self.mem_write(addr, result);
+    }
+
+    // {adr} := Y & H
+    fn shy(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.register_y & (addr >> 8) as u8;
+        self.mem_write(addr, result);
+    }
+
+    // {adr} := X & H
+    fn shx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let result = self.register_x & (addr >> 8) as u8;
+        self.mem_write(addr, result);
+    }
+
+    // AND X register with accumulator and store result in stack pointer, then AND stack pointer with the high byte of the target address of the argument + 1. Store result in memory.
+    fn tas(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.stack_pointer = self.register_x & self.register_a;
+        let result = self.stack_pointer & ((addr >> 8) as u8 + 1);
+        self.mem_write(addr, result);
+    }
+
+    // A,X,S:={adr}&S
+    fn las(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        let result = data & self.stack_pointer;
+        self.update_zero_and_negative_flags(result);
+        self.register_a = result;
+        self.register_x = result;
+        self.stack_pointer = result;
     }
 }
 
