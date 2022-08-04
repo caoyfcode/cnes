@@ -964,6 +964,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let data = self.mem_read(addr);
         let data = self.arithmetic_shift_left_update_nzc(data);
+        self.mem_write(addr, data);
         self.register_a = self.register_a | data;
         self.update_zero_and_negative_flags(self.register_a);
     }
@@ -973,6 +974,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let data = self.mem_read(addr);
         let data = self.rotate_left_through_carry_update_nzc(data);
+        self.mem_write(addr, data);
         self.register_a = self.register_a & data;
         self.update_zero_and_negative_flags(self.register_a);
     }
@@ -982,6 +984,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let data = self.mem_read(addr);
         let data = self.logical_shift_right_update_nzc(data);
+        self.mem_write(addr, data);
         self.register_a = self.register_a ^ data;
         self.update_zero_and_negative_flags(self.register_a);
     }
@@ -991,7 +994,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let data = self.mem_read(addr);
         let data = self.rotate_right_through_carry_update_nzc(data);
-        // TODO ?加法是用新的 carrry 还是旧的
+        self.mem_write(addr, data);
         self.add_to_a_with_carry_update_nvzc(data);
     }
 
