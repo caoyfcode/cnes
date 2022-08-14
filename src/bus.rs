@@ -1,5 +1,6 @@
-use crate::{cpu::Mem, cartridge::Rom};
+use crate::{cpu::Mem, cartridge::Rom, ppu::PPU};
 
+// CPU memory map
 //  _______________ $10000  _______________
 // | PRG-ROM       |       |               |
 // | Upper Bank    |       |               |
@@ -27,49 +28,76 @@ use crate::{cpu::Mem, cartridge::Rom};
 // |_ _ _ _ _ _ _ _| $0100 |               |
 // | Zero Page     |       |               |
 // |_______________| $0000 |_______________|
-const RAM: u16 = 0x0000; // RAM 起始地址
-const RAM_MIRRORS_END: u16 = 0x1fff; // RAM 映射截止
-const PPU_REGISTERS: u16 = 0x2000; // PPU Registers 起始地址
-const PPU_REGISTERS_MIRRORS_END: u16 = 0x3fff; // PPU Registers 映射截止
+// PPU registers:
+// Controller: 0x2000 (Control 1)
+// Mask:       0x2001 (Control 2)
+// Status:     0x2002
+// OAM Address:0x2003
+// OAM Data:   0x2004
+// Scroll:     0x2005
+// Address:    0x2006
+// Data:       0x2007
+// OAM DMA:    0x4014
 
 pub struct Bus {
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
-    rom: Rom,
+    prg_rom: Vec<u8>,
+    ppu: PPU,
 }
 
 impl Bus {
     pub fn new(rom: Rom) -> Self {
         Bus {
             cpu_vram: [0; 2048],
-            rom,
+            prg_rom: rom.prg_rom,
+            ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
         }
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
         let mut idx = addr - 0x8000;
-        if self.rom.prg_rom.len() == 0x4000 && idx >= 0x4000 { // 仅仅有 lower bank
+        if self.prg_rom.len() == 0x4000 && idx >= 0x4000 { // 仅仅有 lower bank
             idx = idx % 0x4000;
         }
-        self.rom.prg_rom[idx as usize]
+        self.prg_rom[idx as usize]
     }
 }
 
 impl Mem for Bus {
-    fn mem_read(&self, addr: u16) -> u8 {
+    fn mem_read(&mut self, addr: u16) -> u8 {
         match addr {
-            RAM..=RAM_MIRRORS_END => { // CPU VRAM
+            0..=0x1fff => { // CPU VRAM
                 let mirror_down_addr = addr & 0b0000_0111_1111_1111;  // 0x0000..0x0800 为 RAM
                 self.cpu_vram[mirror_down_addr as usize]
             }
-            PPU_REGISTERS..=PPU_REGISTERS_MIRRORS_END => { // PPU Registers
-                let _mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为 PPU Registers
-                todo!("PPU is not supported yet")
+            0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => {
+                println!("Attempt to read from write-only PPU address {:04x}", addr);
+                0
+            }
+            0x2002 => self.ppu.read_status(),
+            0x2004 => self.ppu.read_oam_data(),
+            0x2007 => self.ppu.read_data(),
+            0x2008..=0x3fff => { // PPU Registers
+                let mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为 PPU Registers
+                self.mem_read(mirror_down_addr)
+            }
+            0x4000..=0x4013 | 0x4015 => {
+                println!("Attempt to read from APU Register at {:04x}", addr);
+                0
+            }
+            0x4016 => {
+                println!("Ignoring joypad 1");
+                0
+            }
+            0x4017 => {
+                println!("Ignoring joypad 2");
+                0
             }
             0x8000..=0xffff => { // PRG ROM
                 self.read_prg_rom(addr)
             }
             _ => {
-                println!("Ignoring mem access at {}", addr);
+                println!("Ignoring mem access at {:04x}", addr);
                 0
             }
         }
@@ -77,19 +105,47 @@ impl Mem for Bus {
 
     fn mem_write(&mut self, addr: u16, data: u8) {
         match addr {
-            RAM..=RAM_MIRRORS_END => { // CPU VRAM
+            0..=0x1fff => { // CPU VRAM
                 let mirror_down_addr = addr & 0b0000_0111_1111_1111;  // 0x0000..0x0800 为 RAM
                 self.cpu_vram[mirror_down_addr as usize] = data;
             }
-            PPU_REGISTERS..=PPU_REGISTERS_MIRRORS_END => { // I/O Registers
-                let _mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为I/O Registers
-                todo!("PPU is not supported yet")
+            0x2000 => self.ppu.write_to_controller(data),
+            0x2001 => self.ppu.write_to_mask(data),
+            0x2002 => {
+                println!("Attempt to read from read-only PPU address {:04x}", addr);
+            }
+            0x2003 => self.ppu.write_to_oam_addr(data),
+            0x2004 => self.ppu.write_to_oam_data(data),
+            0x2005 => self.ppu.write_to_scroll(data),
+            0x2006 => self.ppu.write_to_addr(data),
+            0x2007 => self.ppu.write_to_data(data),
+            0x2008..=0x3fff => { // I/O Registers
+                let mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为I/O Registers
+                self.mem_write(mirror_down_addr, data);
+            }
+            0x4014 => { // Writing $XX will upload 256 bytes of data from CPU page $XX00-$XXFF to the internal PPU OAM.
+                let mut buffer: [u8; 256] = [0; 256];
+                let base = (addr as u16) << 8;
+                for i in 0..=0xffu16 {
+                    buffer[i as usize] = self.mem_read(base + i);
+                }
+                self.ppu.write_to_oam_dma(&buffer);
+                // TODO 驱动多个 PPU 周期
+            }
+            0x4000..=0x4013 | 0x4015 => {
+                println!("Ignoring APU Register access at {}", addr);
+            }
+            0x4016 => {
+                println!("Ignoring joypad 1");
+            }
+            0x4017 => {
+                println!("Ignoring joypad 2");
             }
             0x8000..=0xffff => { // PRG ROM
                 panic!("Attempt to write to Cartridge ROM space")
             }
             _ => {
-                println!("Ignoring mem access at {}", addr);
+                println!("Ignoring mem access at {:04x}", addr);
             }
         }
     }

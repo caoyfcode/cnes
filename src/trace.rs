@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{opcodes, cpu::{CPU, Mem, AddressingMode}};
 
 /// 得到 cpu 下一条要执行的指令信息, 在该指令执行前调用
-pub fn trace(cpu: &CPU) -> String {
+pub fn trace(cpu: &mut CPU) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));

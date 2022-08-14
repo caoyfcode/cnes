@@ -85,7 +85,7 @@ fn color(byte: u8) -> Color {
 }
 
 /// 如果屏幕状态改变, 返回 true
-fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 32 * 3]) -> bool {
+fn read_screen_state(cpu: &mut CPU, frame: &mut [u8; 32 * 32 * 3]) -> bool {
     let mut frame_idx = 0;
     let mut update = false;
     for i in 0x0200..0x0600 {
