@@ -50,7 +50,7 @@ bitflags! {
     /// - PHP 触发, UB=11, push 后对 P 无影响
     /// - BRK 触发, UB=11, push 后 I 置为 1
     /// - IRQ 触发, UB=10, push 后 I 置为 1
-    /// - MNI 触发, UB=10, push 后 I 置为 1
+    /// - NMI 触发, UB=10, push 后 I 置为 1
     pub struct CpuFlags : u8 {
         const CARRY = 0b0000_0001;
         const ZERO = 0b0000_0010;
@@ -97,6 +97,9 @@ pub struct CPU {
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
 const STACK_RESET: u8 = 0xfd;
+const INTERRUPT_RESET_VECTOR: u16 = 0xfffc;
+const INTERRUPT_NMI_VECTOR: u16 = 0xfffa;
+const INTERRUPT_IRQ_BRK_VECTOR: u16 = 0xfffe;
 
 impl Mem for CPU {
     fn mem_read(&mut self, addr: u16) -> u8 {
@@ -135,7 +138,7 @@ impl CPU {
         self.run();
     }
 
-    /// 模拟 NES 插入卡带时的动作
+    /// 模拟 NES 插入卡带时的动作(RESET 中断)
     /// 1. 状态重置(寄存器与状态寄存器)
     /// 2. 将 PC 寄存器值设为地址 0xFFFC 处的 16 bit 数值
     pub fn reset(&mut self) {
@@ -145,7 +148,24 @@ impl CPU {
         self.status = CpuFlags::from_bits_truncate(0b100100);
         self.stack_pointer = STACK_RESET;
 
-        self.program_counter = self.mem_read_u16(0xFFFC);
+        self.program_counter = self.mem_read_u16(INTERRUPT_RESET_VECTOR);
+    }
+
+    /// NMI 中断
+    /// 1. 下一条指令地址入栈
+    /// 2. 状态寄存器入栈(UB=10)
+    /// 3. 状态寄存器 I 置 1
+    /// 4. 将 PC 寄存器值设为地址 0xFFFA 处的 16 bit 数值
+    pub fn nmi(&mut self) {
+        self.stack_push_u16(self.program_counter); // 下一条指令地址
+        let mut flag = self.status.clone();
+        flag.insert(CpuFlags::BREAK2);
+        flag.remove(CpuFlags::BREAK);
+        self.stack_push(flag.bits);
+        self.status.insert(CpuFlags::INTERRUPT_DISABLE);
+
+        self.bus.tick(2);
+        self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
     }
 
     /// 1. 将 ROM 加载至 0x8000 至 0xFFFF
@@ -169,6 +189,9 @@ impl CPU {
         let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
         loop {
+            if let Some(_) = self.bus.poll_nmi_status() {
+                self.nmi();
+            }
             callback(self);
             let code = self.mem_read(self.program_counter);
             self.program_counter += 1;
@@ -460,6 +483,8 @@ impl CPU {
             if program_counter_state == self.program_counter { // 没有进行跳转则转至下一条指令
                 self.program_counter += (opcode.len - 1) as u16;
             }
+
+            self.bus.tick(opcode.cycles);
         }
     }
 

@@ -58,6 +58,8 @@ pub struct PPU {
     // 状态信息
     mirroring: Mirroring, // screen miroring
     pub nmi_interrupt: Option<u8>, // 是否生成了 NMI 中断
+    scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
+    cycles: u16, // scanline 内 ppu 周期, 0..341
 }
 
 impl PPU {
@@ -78,6 +80,29 @@ impl PPU {
 
             mirroring,
             nmi_interrupt: None,
+            scanline: 0,
+            cycles: 0,
+        }
+    }
+
+    pub fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
+        self.cycles += cycles as u16;
+        if self.cycles >= 341 {
+            self.cycles = 0;
+            self.scanline += 1;
+
+            if self.scanline == 241 { // VBLANK
+                self.status.insert(StatusRegister::VBLANK_STARTED);
+                if self.controller.contains(ControllerRegister::GENERATE_NMI) {
+                    self.nmi_interrupt = Some(1);
+                }
+            }
+
+            if self.scanline >= 262 {
+                self.scanline = 0;
+                self.nmi_interrupt = None;
+                self.status.remove(StatusRegister::VBLANK_STARTED);
+            }
         }
     }
 

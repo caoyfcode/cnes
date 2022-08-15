@@ -40,9 +40,12 @@ use crate::{cpu::Mem, cartridge::Rom, ppu::PPU};
 // OAM DMA:    0x4014
 
 pub struct Bus {
+    // 组成
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
     ppu: PPU,
+    // 状态信息
+    cycles: u32, // CPU 时钟周期
 }
 
 impl Bus {
@@ -51,7 +54,18 @@ impl Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
+            cycles: 0,
         }
+    }
+
+    pub fn tick(&mut self, cycles: u8) { // CPU 时钟经过 cycles 个周期
+        self.cycles += cycles as u32;
+        self.ppu.tick(3 * cycles);
+    }
+
+    // 是否有 NMI 中断传来
+    pub fn poll_nmi_status(&self) -> Option<u8> {
+        self.ppu.nmi_interrupt
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
