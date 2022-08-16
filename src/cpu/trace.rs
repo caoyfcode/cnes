@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{opcodes, cpu::{CPU, Mem, AddressingMode}};
+use super::{opcodes, CPU, Mem, AddressingMode};
 
 /// 得到 cpu 下一条要执行的指令信息, 在该指令执行前调用
 pub fn trace(cpu: &mut CPU) -> String {

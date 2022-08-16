@@ -1,7 +1,6 @@
 use cnes::bus::Bus;
 use cnes::cartridge::Rom;
-use cnes::cpu::{CPU, Mem};
-use cnes::trace::trace;
+use cnes::cpu::{CPU, Mem, trace::trace};
 use rand::Rng;
 use sdl2::EventPump;
 use sdl2::event::Event;

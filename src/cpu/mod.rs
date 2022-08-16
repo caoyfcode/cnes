@@ -1,6 +1,9 @@
+mod opcodes;
+pub mod trace;
+
 use std::collections::HashMap;
 use bitflags::bitflags;
-use crate::{opcodes, bus::Bus};
+use crate::bus::Bus;
 
 /// # 寻址模式
 /// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
