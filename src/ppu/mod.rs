@@ -1,8 +1,9 @@
 mod registers;
+pub mod frame;
 
 use crate::cartridge::Mirroring;
 
-use self::registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister};
+use self::{registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister}, frame::Frame};
 
 
 // PPU memory map
@@ -57,9 +58,10 @@ pub struct PPU {
     internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值
     // 状态信息
     mirroring: Mirroring, // screen miroring
-    pub nmi_interrupt: Option<u8>, // 是否生成了 NMI 中断
+    nmi_interrupt: Option<u8>, // 是否生成了 NMI 中断
     scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
     cycles: u16, // scanline 内 ppu 周期, 0..341
+    frame: Frame,
 }
 
 impl PPU {
@@ -82,13 +84,14 @@ impl PPU {
             nmi_interrupt: None,
             scanline: 0,
             cycles: 0,
+            frame: Frame::new(),
         }
     }
 
     pub fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
         self.cycles += cycles as u16;
         if self.cycles >= 341 {
-            self.cycles = 0;
+            self.cycles = self.cycles - 341;
             self.scanline += 1;
 
             if self.scanline == 241 { // VBLANK
@@ -96,6 +99,7 @@ impl PPU {
                 if self.controller.contains(ControllerRegister::GENERATE_NMI) {
                     self.nmi_interrupt = Some(1);
                 }
+                self.update_frame();
             }
 
             if self.scanline >= 262 {
@@ -106,22 +110,66 @@ impl PPU {
         }
     }
 
+    /// 检查是否生成了 NMI 中断, 检查将自动重置(take)
+    pub fn poll_nmi_interrupt(&mut self) -> Option<u8> {
+        self.nmi_interrupt.take()
+    }
+
+    /// 是否生成了 NMI 中断信号
+    pub fn nmi_interrupt(&self) -> Option<u8> {
+        self.nmi_interrupt
+    }
+
+    /// 获得此时的屏幕状态
+    pub fn frame(&self) -> &Frame {
+        &self.frame
+    }
+
     // 将 0x2000..=0x3eff 映射到 vram 下标
+    // VERTICAL: A B A B
+    // HORIZONTAL: A A B B
     fn vram_mirror_addr(&self, addr: u16) -> u16 {
         let mirrored = addr & 0b0010_1111_1111_1111;
-        let vram_index = mirrored - 0x0200;
-        match self.mirroring {
-            Mirroring::VERTICAL => { // A B A B
-                vram_index & 0b0000_0011_1111_1111
-            }
-            Mirroring::HORIZONTAL => { // A A B B
-                if vram_index < 0x0400 {
-                    vram_index & 0b0000_0001_1111_1111
-                } else {
-                    (vram_index & 0b0000_0001_1111_1111) + 0x0200
+        let vram_index = mirrored - 0x2000;
+        let name_table = vram_index / 0x400; // 0, 1, 2, 3
+        match (&self.mirroring, name_table) {
+            (Mirroring::VERTICAL, 2) | (Mirroring::VERTICAL, 3) => vram_index - 0x800,
+            (Mirroring::HORIZONTAL, 1) => vram_index - 0x400,
+            (Mirroring::HORIZONTAL, 2) => vram_index - 0x400,
+            (Mirroring::HORIZONTAL, 3) => vram_index - 0x800,
+            _ => vram_index, // TODO FOUR SCREEN
+        }
+    }
+
+    fn update_frame(&mut self) {
+        let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
+        let bank_base = bank * 0x1000;
+
+        for idx in 0..0x03c0usize { // nametable 1
+            let tile = self.vram[idx] as usize;
+            let tile_x = idx % 32;
+            let tile_y = idx / 32;
+            let tile_base = bank_base + tile * 16;
+            let tile = &self.chr_rom[tile_base..(tile_base + 16)];
+
+            for y in 0..8usize {
+                let lo = tile[y];
+                let hi = tile[y + 8];
+
+                for x in 0..8usize {
+                    let hi = (hi >> (7 - x)) & 0x1;
+                    let lo = (lo >> (7 - x)) & 0x1;
+                    let color = ((hi) << 1) | lo;
+                    let rgb = match color {
+                        0 => frame::SYSTEM_PALLETE[0x01],
+                        1 => frame::SYSTEM_PALLETE[0x27],
+                        2 => frame::SYSTEM_PALLETE[0x23],
+                        3 => frame::SYSTEM_PALLETE[0x30],
+                        _ => panic!("color can't be {:02x}", color),
+                    };
+                    self.frame.set_pixel(tile_x * 8 + x, tile_y * 8 + y, rgb);
                 }
             }
-            _ => vram_index // TODO FOUR_SCREEN
         }
     }
 
@@ -182,8 +230,16 @@ impl PPU {
                 self.vram[addr as usize] = data;
             }
             0x3f00..=0x3fff => {
-                let addr = addr & 0b0011_1111_0001_1111;
-                self.palette_table[addr as usize - 0x3f00] = data;
+                let addr = addr & 0b0011_1111_0001_1111; // mirroring
+                match addr {
+                    //  $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
+                    0x3f10 | 0x3f14 | 0x3f18 | 0x3f1c => {
+                        self.palette_table[addr as usize - 0x3f00 - 0x10] = data;
+                    }
+                    _ => {
+                        self.palette_table[addr as usize - 0x3f00] = data;
+                    }
+                }
             }
             _ => {
                 panic!("unexpected access to mirrored space {:04x}", addr)
@@ -208,8 +264,16 @@ impl PPU {
                 result
             }
             0x3f00..=0x3fff => {
-                let addr = addr & 0b0011_1111_0001_1111;
-                self.palette_table[addr as usize - 0x3f00]
+                let addr = addr & 0b0011_1111_0001_1111; // mirroring
+                match addr {
+                    //  $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
+                    0x3f10 | 0x3f14 | 0x3f18 | 0x3f1c => {
+                        self.palette_table[addr as usize - 0x3f00 - 0x10]
+                    }
+                    _ => {
+                        self.palette_table[addr as usize - 0x3f00]
+                    }
+                }
             }
             _ => {
                 panic!("unexpected access to mirrored space {:04x}", addr)

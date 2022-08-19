@@ -88,14 +88,14 @@ pub trait Mem {
 
 /// # CPU struct
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
-pub struct CPU {
+pub struct CPU<'a> {
     pub register_a: u8,
     pub register_x: u8,
     pub register_y: u8,
     pub status: CpuFlags,
     pub program_counter: u16,
     pub stack_pointer: u8,  // 指向空位置
-    pub bus: Bus, // 总线(连接CPU RAM, PPU, Rom 等)
+    pub bus: Bus<'a>, // 总线(连接CPU RAM, PPU, Rom 等)
 }
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
@@ -104,7 +104,7 @@ const INTERRUPT_RESET_VECTOR: u16 = 0xfffc;
 const INTERRUPT_NMI_VECTOR: u16 = 0xfffa;
 const INTERRUPT_IRQ_BRK_VECTOR: u16 = 0xfffe;
 
-impl Mem for CPU {
+impl Mem for CPU<'_> {
     fn mem_read(&mut self, addr: u16) -> u8 {
         self.bus.mem_read(addr)
     }
@@ -122,8 +122,8 @@ impl Mem for CPU {
     }
 }
 
-impl CPU {
-    pub fn new(bus: Bus) -> Self {
+impl<'a> CPU<'a> {
+    pub fn new(bus: Bus<'a>) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,

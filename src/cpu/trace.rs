@@ -121,6 +121,120 @@ pub fn trace(cpu: &mut CPU) -> String {
     ).to_ascii_uppercase()
 }
 
+// 不显示 mem_val (可以避免读 PPU 寄存器导致状态改变)
+pub fn trace_without_content(cpu: &mut CPU) -> String {
+    let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
+    let code = cpu.mem_read(cpu.program_counter);
+    let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
+
+    let mut hex_dump = vec![code];
+
+    let mem_addr = match opcode.mode {
+        AddressingMode::Immediate | AddressingMode::NoneAddressing => 0,
+        _ => cpu.get_absolute_address(&opcode.mode, cpu.program_counter + 1),
+    };
+    let asm_operand_and_addr_val = match opcode.len {
+        1 => match opcode.code {
+            0x0a | 0x4a | 0x2a | 0x6a => format!("A "), // ASL, LSR, ROL, ROR, Accumulator mode
+            _ => format!(""),
+        }
+        2 => {
+            let operand = cpu.mem_read(cpu.program_counter + 1);
+            hex_dump.push(operand);
+
+            match opcode.mode {
+                AddressingMode::Immediate => format!("#${:02x}", operand),
+                AddressingMode::ZeroPage => format!("${:02x}", mem_addr),
+                AddressingMode::ZeroPage_X => format!(
+                    "${:02x},X @ {:02x}",
+                    operand, mem_addr
+                ),
+                AddressingMode::ZeroPage_Y => format!(
+                    "${:02x},Y @ {:02x}",
+                    operand, mem_addr
+                ),
+                AddressingMode::Indirect_X => format!(
+                    "(${:02x},X) @ {:02x} = {:04x}",
+                    operand,
+                    operand.wrapping_add(cpu.register_x),
+                    mem_addr
+                ),
+                AddressingMode::Indirect_Y => format!(
+                    "(${:02x}),Y = {:04x} @ {:04x}",
+                    operand,
+                    mem_addr.wrapping_sub(cpu.register_y as u16),
+                    mem_addr
+                ),
+                AddressingMode::NoneAddressing => { // branch 指令
+                    let addr = cpu.program_counter
+                        .wrapping_add(2)
+                        .wrapping_add((operand as i8) as u16);
+                    format!("${:04x}", addr)
+                }
+                _ => panic!(
+                    "unexpected addressing mode {:?} has ops-len 2. code {:02x}",
+                    opcode.mode, opcode.code
+                ),
+            }
+        }
+        3 => {
+            let lo = cpu.mem_read(cpu.program_counter + 1);
+            let hi = cpu.mem_read(cpu.program_counter + 2);
+            hex_dump.push(lo);
+            hex_dump.push(hi);
+
+            let operand = cpu.mem_read_u16(cpu.program_counter + 1);
+
+            match opcode.mode {
+                AddressingMode::Absolute => format!("${:04x}", mem_addr),
+                AddressingMode::Absolute_X => format!(
+                    "${:04x},X @ {:04x}",
+                    operand, mem_addr
+                ),
+                AddressingMode::Absolute_Y => format!(
+                    "${:04x},Y @ {:04x}",
+                    operand, mem_addr
+                ),
+                AddressingMode::NoneAddressing => { // jump 指令
+                    if opcode.code == 0x6c { // jump indirect
+                        let target = if operand & 0x00ff == 0x00ff {
+                            let lo = cpu.mem_read(operand) as u16;
+                            let hi = cpu.mem_read(operand & 0xff00) as u16;
+                            (hi << 8) | lo
+                        } else {
+                            cpu.mem_read_u16(operand)
+                        };
+                        format!("(${:04x}) = {:04x}", operand, target)
+                    } else { // jmp absolute or jsr(absolute)
+                        format!("${:04x}", operand)
+                    }
+                }
+                _ => panic!(
+                    "unexpected addressing mode {:?} has ops-len 3. code {:02x}",
+                    opcode.mode, opcode.code
+                )
+            }
+        }
+        _ => { // 目前暂无
+            format!("")
+        }
+    };
+    let hex_str = hex_dump
+        .iter()
+        .map(|num| format!("{:02x}", num))
+        .collect::<Vec<String>>()
+        .join(" ");
+    let asm_str = format!(
+        "{:04x}  {:8} {: >4} {}",
+        cpu.program_counter, hex_str, opcode.mnemonic, asm_operand_and_addr_val
+    ).trim().to_string();
+
+    format!(
+        "{:47} A:{:02x} X:{:02x} Y:{:02x} P:{:02x} SP:{:02x}",
+        asm_str, cpu.register_a, cpu.register_x, cpu.register_y, cpu.status, cpu.stack_pointer
+    ).to_ascii_uppercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

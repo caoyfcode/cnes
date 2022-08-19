@@ -39,33 +39,49 @@ use crate::{cpu::Mem, cartridge::Rom, ppu::PPU};
 // Data:       0x2007
 // OAM DMA:    0x4014
 
-pub struct Bus {
+pub struct Bus<'call> {
     // 组成
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
     ppu: PPU,
     // 状态信息
     cycles: u32, // CPU 时钟周期
+    frame_callback: Box<dyn FnMut(&PPU) + 'call>
 }
 
-impl Bus {
+impl<'a> Bus<'a> {
     pub fn new(rom: Rom) -> Self {
+        Self::new_with_frame_callback(rom, move |_| {})
+    }
+
+    pub fn new_with_frame_callback<'call, F>(rom: Rom, frame_callback: F) -> Bus<'call>
+    where
+        F: FnMut(&PPU) + 'call,
+    {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
             cycles: 0,
+            frame_callback: Box::from(frame_callback),
         }
     }
 
     pub fn tick(&mut self, cycles: u8) { // CPU 时钟经过 cycles 个周期
         self.cycles += cycles as u32;
+
+        let nmi_before = self.ppu.nmi_interrupt().is_some();
         self.ppu.tick(3 * cycles);
+        let nmi_after = self.ppu.nmi_interrupt().is_some();
+
+        if !nmi_before && nmi_after {
+            (self.frame_callback)(&self.ppu);
+        }
     }
 
     // 是否有 NMI 中断传来
-    pub fn poll_nmi_status(&self) -> Option<u8> {
-        self.ppu.nmi_interrupt
+    pub fn poll_nmi_status(&mut self) -> Option<u8> {
+        self.ppu.poll_nmi_interrupt()
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
@@ -77,7 +93,7 @@ impl Bus {
     }
 }
 
-impl Mem for Bus {
+impl Mem for Bus<'_> {
     fn mem_read(&mut self, addr: u16) -> u8 {
         match addr {
             0..=0x1fff => { // CPU VRAM
