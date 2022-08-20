@@ -1,5 +1,6 @@
 mod registers;
 pub mod frame;
+mod palette;
 
 use crate::cartridge::Mirroring;
 
@@ -141,6 +142,11 @@ impl PPU {
         }
     }
 
+    // 绘制相关
+    // 背景:
+    // 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern
+    // 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
+
     fn update_frame(&mut self) {
         let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
         let bank_base = bank * 0x1000;
@@ -151,6 +157,7 @@ impl PPU {
             let tile_y = idx / 32;
             let tile_base = bank_base + tile * 16;
             let tile = &self.chr_rom[tile_base..(tile_base + 16)];
+            let background_palette = palette::background_palette(self, tile_x, tile_y);
 
             for y in 0..8usize {
                 let lo = tile[y];
@@ -160,13 +167,7 @@ impl PPU {
                     let hi = (hi >> (7 - x)) & 0x1;
                     let lo = (lo >> (7 - x)) & 0x1;
                     let color = ((hi) << 1) | lo;
-                    let rgb = match color {
-                        0 => frame::SYSTEM_PALLETE[0x01],
-                        1 => frame::SYSTEM_PALLETE[0x27],
-                        2 => frame::SYSTEM_PALLETE[0x23],
-                        3 => frame::SYSTEM_PALLETE[0x30],
-                        _ => panic!("color can't be {:02x}", color),
-                    };
+                    let rgb = palette::SYSTEM_PALETTE[background_palette[color as usize] as usize];
                     self.frame.set_pixel(tile_x * 8 + x, tile_y * 8 + y, rgb);
                 }
             }
