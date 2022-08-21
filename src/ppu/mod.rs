@@ -143,11 +143,17 @@ impl PPU {
     }
 
     // 绘制相关
-    // 背景:
-    // 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern
-    // 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
 
+    /// 更新整个屏幕的像素 (在 scanline 241 之前要完成)
     fn update_frame(&mut self) {
+        self.update_background();
+        self.update_sprites();
+    }
+
+    /// 绘制背景:
+    /// 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern,
+    /// 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
+    fn update_background(&mut self) {
         let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
         let bank_base = bank * 0x1000;
 
@@ -172,6 +178,80 @@ impl PPU {
                 }
             }
         }
+    }
+
+    /// 绘制 sprites
+    /// OAM DATA 共 256 字节, 每个 sprite 用到 4 个字节(共 64 个):
+    /// - 0: Y position of top of sprite
+    /// - 1: index number
+    ///   * for 8 * 8 sprites, this is the tile number of this sprite within the pattern table selected in bit 3 of PPUCTRL
+    ///   * For 8 * 16 sprites, the PPU ignores the pattern table selection and selects a pattern table from bit 0 of this number.
+    /// - 2: Attributes
+    ///   ```txt
+    ///   76543210
+    ///   ||||||||
+    ///   ||||||++- Palette (4 to 7) of sprite
+    ///   |||+++--- Unimplemented (read 0)
+    ///   ||+------ Priority (0: in front of background; 1: behind background)
+    ///   |+------- Flip sprite horizontally
+    ///   +-------- Flip sprite vertically
+    ///   ```
+    /// - 3: X position of left side of sprite.
+    fn update_sprites(&mut self) {
+        if self.controller.contains(ControllerRegister::SPRITE_SIZE) {
+            self.update_sprites_8_16();
+        } else {
+            self.update_sprites_8_8();
+        }
+    }
+
+    fn update_sprites_8_8(&mut self) {
+        let bank = self.controller.contains(ControllerRegister::SPRITE_PATTERN_ADDR) as usize;
+        let bank_base = bank * 0x1000;
+
+        for idx in 0..64usize {
+            let sprite_start = idx * 4;
+            let tile_y = self.oam_data[sprite_start] as usize;
+            let tile = self.oam_data[sprite_start + 1];
+            let attributes = self.oam_data[sprite_start + 2];
+            let tile_x = self.oam_data[sprite_start + 3] as usize;
+
+            let palette_idx = (attributes & 0b11) as usize;
+            let flip_h = attributes & 0b0100_0000 == 0b0100_0000;
+            let flip_v = attributes & 0b1000_0000 == 0b1000_0000;
+            let _priority = attributes & 0b0010_0000 == 0b0010_0000;
+
+            let tile_base = bank_base + (tile as usize) * 16;
+            let tile = &self.chr_rom[tile_base..(tile_base + 16)];
+            let sprites_palette = palette::sprites_palette(self, palette_idx);
+
+            for y in 0..8usize {
+                let lo = tile[y];
+                let hi = tile[y + 8];
+
+                for x in 0..8usize {
+                    let hi = (hi >> (7 - x)) & 0x1;
+                    let lo = (lo >> (7 - x)) & 0x1;
+                    let color = ((hi) << 1) | lo;
+                    let rgb = if color == 0 { // 透明, 跳过绘制
+                        continue;
+                    } else {
+                        palette::SYSTEM_PALETTE[sprites_palette[color as usize] as usize]
+                    };
+                    match (flip_h, flip_v) { // 精灵的绘制精确到像素
+                        (false, false) => self.frame.set_pixel(tile_x + x, tile_y + y, rgb),
+                        (false, true) => self.frame.set_pixel(tile_x + x, tile_y + 7 - y, rgb),
+                        (true, false) => self.frame.set_pixel(tile_x + 7 - x, tile_y + y, rgb),
+                        (true, true) => self.frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y, rgb),
+                    }
+
+                }
+            }
+        }
+    }
+
+    fn update_sprites_8_16(&mut self) {
+        todo!("8 * 16 size sprites not implement")
     }
 
     // registers

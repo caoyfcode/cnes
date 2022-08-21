@@ -32,11 +32,11 @@ pub(super) static SYSTEM_PALETTE: [(u8,u8,u8); 64] = [
    (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
 ];
 
-pub(super) fn background_palette(ppu: &PPU,  tile_x: usize, tile_y: usize) -> [u8; 4] {
+pub(super) fn background_palette(ppu: &PPU, tile_x: usize, tile_y: usize) -> [u8; 4] {
     let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
     let attr_byte = ppu.vram[attr_table_idx + 960];
 
-    let pallete_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
+    let palette_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
         (0,0) => attr_byte & 0b11,
         (1,0) => (attr_byte >> 2) & 0b11,
         (0,1) => (attr_byte >> 4) & 0b11,
@@ -44,11 +44,21 @@ pub(super) fn background_palette(ppu: &PPU,  tile_x: usize, tile_y: usize) -> [u
         (_,_) => panic!("should not happen"),
     } as usize;
 
-    let pallate_start = pallete_idx * 4 + 1;
+    let palette_start = palette_idx * 4 + 1;
     [
         ppu.palette_table[0],
-        ppu.palette_table[pallate_start],
-        ppu.palette_table[pallate_start + 1],
-        ppu.palette_table[pallate_start + 2]
+        ppu.palette_table[palette_start],
+        ppu.palette_table[palette_start + 1],
+        ppu.palette_table[palette_start + 2]
+    ]
+}
+
+pub(super) fn sprites_palette(ppu: &PPU, palette_idx: usize) -> [u8; 4] {
+    let palette_start = palette_idx * 4 + 0x11;
+    [
+        0,
+        ppu.palette_table[palette_start],
+        ppu.palette_table[palette_start + 1],
+        ppu.palette_table[palette_start + 2]
     ]
 }

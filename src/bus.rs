@@ -155,7 +155,7 @@ impl Mem for Bus<'_> {
             }
             0x4014 => { // Writing $XX will upload 256 bytes of data from CPU page $XX00-$XXFF to the internal PPU OAM.
                 let mut buffer: [u8; 256] = [0; 256];
-                let base = (addr as u16) << 8;
+                let base = (data as u16) << 8;
                 for i in 0..=0xffu16 {
                     buffer[i as usize] = self.mem_read(base + i);
                 }
