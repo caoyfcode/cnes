@@ -36,7 +36,7 @@ pub(super) fn background_palette(ppu: &PPU,  tile_x: usize, tile_y: usize) -> [u
     let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
     let attr_byte = ppu.vram[attr_table_idx + 960];
 
-    let pallete_idx = match (tile_y % 4 / 2, tile_x % 4 / 2) {
+    let pallete_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
         (0,0) => attr_byte & 0b11,
         (1,0) => (attr_byte >> 2) & 0b11,
         (0,1) => (attr_byte >> 4) & 0b11,
