@@ -2,6 +2,9 @@ mod cpu;
 mod bus;
 mod cartridge;
 mod ppu;
+mod joypad;
+
+use std::collections::HashMap;
 
 use bus::Bus;
 use cartridge::Rom;
@@ -26,10 +29,20 @@ pub fn run(filename: &str) {
     let creator = canvas.texture_creator();
     let mut texture = creator.create_texture_target(PixelFormatEnum::RGB24, 256, 240).unwrap();
 
+    let mut key_map = HashMap::new();
+    key_map.insert(Keycode::W, joypad::Button::UP);
+    key_map.insert(Keycode::A, joypad::Button::LEFT);
+    key_map.insert(Keycode::S, joypad::Button::DOWN);
+    key_map.insert(Keycode::D, joypad::Button::RIGHT);
+    key_map.insert(Keycode::RShift, joypad::Button::SECLECT);
+    key_map.insert(Keycode::Return, joypad::Button::START);
+    key_map.insert(Keycode::J, joypad::Button::B);
+    key_map.insert(Keycode::K, joypad::Button::A);
+
     let rom = std::fs::read(filename).unwrap();
     let rom = Rom::new(&rom).unwrap();
 
-    let bus = Bus::new_with_frame_callback(rom, move |ppu| {
+    let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad| {
         texture.update(None, &ppu.frame().data, 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
@@ -38,6 +51,16 @@ pub fn run(filename: &str) {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     std::process::exit(0);
+                }
+                Event::KeyDown {keycode: Some(key), .. } => {
+                    if let Some(button) = key_map.get(&key) {
+                        joypad.set_button_pressed(*button, true);
+                    }
+                }
+                Event::KeyUp{keycode: Some(key), .. } => {
+                    if let Some(button) = key_map.get(&key) {
+                        joypad.set_button_pressed(*button, false);
+                    }
                 }
                 _ => {}
             }

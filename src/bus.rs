@@ -1,4 +1,4 @@
-use crate::{cpu::Mem, cartridge::Rom, ppu::PPU};
+use crate::{cpu::Mem, cartridge::Rom, ppu::PPU, joypad::Joypad};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -44,24 +44,26 @@ pub struct Bus<'call> {
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
     ppu: PPU,
+    joypad: Joypad,
     // 状态信息
     cycles: u32, // CPU 时钟周期
-    frame_callback: Box<dyn FnMut(&PPU) + 'call>
+    frame_callback: Box<dyn FnMut(&PPU, &mut Joypad) + 'call>
 }
 
 impl<'a> Bus<'a> {
     pub fn new(rom: Rom) -> Self {
-        Self::new_with_frame_callback(rom, move |_| {})
+        Self::new_with_frame_callback(rom, move |_, _| {})
     }
 
     pub fn new_with_frame_callback<'call, F>(rom: Rom, frame_callback: F) -> Bus<'call>
     where
-        F: FnMut(&PPU) + 'call,
+        F: FnMut(&PPU, &mut Joypad) + 'call,
     {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
+            joypad: Joypad::new(),
             cycles: 0,
             frame_callback: Box::from(frame_callback),
         }
@@ -75,7 +77,7 @@ impl<'a> Bus<'a> {
         let nmi_after = self.ppu.nmi_interrupt().is_some();
 
         if !nmi_before && nmi_after {
-            (self.frame_callback)(&self.ppu);
+            (self.frame_callback)(&self.ppu, &mut self.joypad);
         }
     }
 
@@ -116,8 +118,7 @@ impl Mem for Bus<'_> {
                 0
             }
             0x4016 => {
-                println!("Ignoring joypad 1");
-                0
+                self.joypad.read()
             }
             0x4017 => {
                 println!("Ignoring joypad 2");
@@ -166,7 +167,7 @@ impl Mem for Bus<'_> {
                 println!("Ignoring APU Register access at {}", addr);
             }
             0x4016 => {
-                println!("Ignoring joypad 1");
+                self.joypad.write(data);
             }
             0x4017 => {
                 println!("Ignoring joypad 2");
