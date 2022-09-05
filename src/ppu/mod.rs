@@ -91,22 +91,33 @@ impl PPU {
 
     pub fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
         self.cycles += cycles as u16;
-        if self.cycles >= 341 {
+        if self.cycles >= 341 { // 新的 scanline
             self.cycles = self.cycles - 341;
             self.scanline += 1;
 
+            // is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角
+            let sprite_0_y = self.oam_data[0] as u16;
+            let sprite_0_x = self.oam_data[3] as u16;
+            if sprite_0_y == self.scanline
+                && sprite_0_x <= self.cycles
+                && self.mask.contains(MaskRegister::SHOW_SPRITES) {
+                self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
+            }
+
             if self.scanline == 241 { // VBLANK
                 self.status.insert(StatusRegister::VBLANK_STARTED);
+                self.status.remove(StatusRegister::SPRITE_ZERO_HIT); // the sprite zero hit flag should be erased upon entering VBLANK state.
                 if self.controller.contains(ControllerRegister::GENERATE_NMI) {
                     self.nmi_interrupt = Some(1);
                 }
                 self.update_frame();
             }
 
-            if self.scanline >= 262 {
+            if self.scanline >= 262 { // 新的一帧
                 self.scanline = 0;
                 self.nmi_interrupt = None;
                 self.status.remove(StatusRegister::VBLANK_STARTED);
+                self.status.remove(StatusRegister::SPRITE_ZERO_HIT);
             }
         }
     }
