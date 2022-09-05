@@ -3,6 +3,7 @@ mod bus;
 mod cartridge;
 mod ppu;
 mod joypad;
+mod common;
 
 use std::collections::HashMap;
 

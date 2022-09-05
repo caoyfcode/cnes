@@ -3,7 +3,7 @@ pub mod trace;
 
 use std::collections::HashMap;
 use bitflags::bitflags;
-use crate::bus::Bus;
+use crate::{bus::Bus, common::Mem};
 
 /// # 寻址模式
 /// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
@@ -63,26 +63,6 @@ bitflags! {
         const BREAK2 = 0b0010_0000;
         const OVERFLOW = 0b0100_0000;
         const NEGATIVE = 0b1000_0000;
-    }
-}
-
-pub trait Mem {
-    fn mem_read(&mut self, addr: u16) -> u8;
-    fn mem_write(&mut self, addr: u16, data: u8);
-
-    /// 按照 Little-Endian 读取 2 字节
-    fn mem_read_u16(&mut self, addr: u16) -> u16 {
-        let lo = self.mem_read(addr) as u16;
-        let hi = self.mem_read(addr + 1) as u16;
-        (hi << 8) | lo
-    }
-
-    /// 按照 Little-Endian 写 2 字节
-    fn mem_write_u16(&mut self, addr: u16, data: u16) {
-        let hi = (data >> 8) as u8;
-        let lo = (data & 0xff) as u8;
-        self.mem_write(addr, lo);
-        self.mem_write(addr + 1, hi);
     }
 }
 

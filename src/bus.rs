@@ -1,4 +1,4 @@
-use crate::{cpu::Mem, cartridge::Rom, ppu::PPU, joypad::Joypad};
+use crate::{cartridge::Rom, ppu::PPU, joypad::Joypad, common::Mem};
 
 // CPU memory map
 //  _______________ $10000  _______________

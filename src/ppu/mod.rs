@@ -1,10 +1,8 @@
 mod registers;
-pub mod frame;
 mod palette;
 
-use crate::cartridge::Mirroring;
-
-use self::{registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister}, frame::{Frame, Rect}};
+use crate::{cartridge::Mirroring, common::{Frame, Rect}};
+use self::registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister};
 
 
 // PPU memory map
