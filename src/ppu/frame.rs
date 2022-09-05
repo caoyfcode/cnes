@@ -5,8 +5,8 @@ pub struct Frame {
 }
 
 impl Frame {
-    const WIDTH: usize = 256; // 32 * 8
-    const HEIGHT: usize = 240; // 30 * 8
+    pub const WIDTH: usize = 256; // 32 * 8
+    pub const HEIGHT: usize = 240; // 30 * 8
 
     pub fn new() -> Self {
         Frame { data: vec![0; Frame::WIDTH * Frame::HEIGHT * 3] }
@@ -22,4 +22,12 @@ impl Frame {
             println!("({}, {}) is out of screen", x, y);
         }
     }
+}
+
+/// 左闭右开, 上闭下开矩形
+pub struct Rect {
+    pub left: usize,
+    pub top: usize,
+    pub right: usize,
+    pub bottom: usize,
 }

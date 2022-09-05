@@ -32,9 +32,9 @@ pub(super) static SYSTEM_PALETTE: [(u8,u8,u8); 64] = [
    (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
 ];
 
-pub(super) fn background_palette(ppu: &PPU, tile_x: usize, tile_y: usize) -> [u8; 4] {
+pub(super) fn background_palette(ppu: &PPU, nametable_base: usize, tile_x: usize, tile_y: usize) -> [u8; 4] {
     let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
-    let attr_byte = ppu.vram[attr_table_idx + 960];
+    let attr_byte = ppu.vram[nametable_base + 960 + attr_table_idx];
 
     let palette_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
         (0,0) => attr_byte & 0b11,

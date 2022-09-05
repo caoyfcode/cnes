@@ -4,7 +4,7 @@ mod palette;
 
 use crate::cartridge::Mirroring;
 
-use self::{registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister}, frame::Frame};
+use self::{registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister}, frame::{Frame, Rect}};
 
 
 // PPU memory map
@@ -165,27 +165,73 @@ impl PPU {
     /// 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern,
     /// 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
     fn update_background(&mut self) {
+        let scroll_x = self.scroll.scroll_x as usize;
+        let scroll_y = self.scroll.scroll_y as usize;
+
+        let (main_nametable, second_nametable): (usize, usize) = match (&self.mirroring, self.controller.base_nametable_address()) {
+            (_, 0x2000) | (Mirroring::VERTICAL, 0x2800) | (Mirroring::HORIZONTAL, 0x2400) => (0, 0x0400),
+            (_, 0x2c00) | (Mirroring::VERTICAL, 0x2400) | (Mirroring::HORIZONTAL, 0x2800) => (0x0400, 0),
+            (_, _) => {
+                panic!("Not supported mirroring type {:?}", &self.mirroring);
+            }
+        };
+
+        self.update_nametable_to_frame(
+            main_nametable,
+            Rect { left: scroll_x, top: scroll_y, right: Frame::WIDTH, bottom: Frame::HEIGHT },
+            - (scroll_x as isize), - (scroll_y as isize)
+        );
+
+
+        if scroll_x > 0 {
+            self.update_nametable_to_frame(
+                second_nametable,
+                Rect { left: 0, top: 0, right: scroll_x, bottom: Frame::HEIGHT },
+                Frame::WIDTH as isize - scroll_x as isize, 0
+            );
+        } else if scroll_y > 0 {
+            self.update_nametable_to_frame(
+                second_nametable,
+                Rect { left: 0, top: 0, right: Frame::WIDTH, bottom: scroll_y },
+                0, Frame::HEIGHT as isize - scroll_y as isize
+            );
+        }
+
+    }
+
+    // 将 nametable 的 src 部分(以pixel为单位) shift(以pixel为单位) 后绘制到 frame 对应位置
+    fn update_nametable_to_frame(&mut self, nametable_base: usize, src: Rect, shift_x: isize, shift_y: isize) {
         let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
         let bank_base = bank * 0x1000;
 
-        for idx in 0..0x03c0usize { // nametable 1
-            let tile = self.vram[idx] as usize;
+        for idx in 0..0x03c0usize { // nametable
+            let tile = self.vram[nametable_base + idx] as usize;
             let tile_x = idx % 32;
             let tile_y = idx / 32;
             let tile_base = bank_base + tile * 16;
             let tile = &self.chr_rom[tile_base..(tile_base + 16)];
-            let background_palette = palette::background_palette(self, tile_x, tile_y);
+            let background_palette = palette::background_palette(self, nametable_base, tile_x, tile_y);
 
             for y in 0..8usize {
+                let pixel_y = tile_y * 8 + y;
+                if pixel_y < src.top || pixel_y >= src.bottom {
+                    continue;
+                }
                 let lo = tile[y];
                 let hi = tile[y + 8];
 
                 for x in 0..8usize {
+                    let pixel_x = tile_x * 8 + x;
+                    if pixel_x < src.left || pixel_x >= src.right {
+                        continue;
+                    }
                     let hi = (hi >> (7 - x)) & 0x1;
                     let lo = (lo >> (7 - x)) & 0x1;
                     let color = ((hi) << 1) | lo;
                     let rgb = palette::SYSTEM_PALETTE[background_palette[color as usize] as usize];
-                    self.frame.set_pixel(tile_x * 8 + x, tile_y * 8 + y, rgb);
+                    self.frame.set_pixel( (shift_x + pixel_x as isize) as usize,
+                        (shift_y + pixel_y as isize) as usize,
+                        rgb);
                 }
             }
         }
