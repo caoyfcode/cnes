@@ -51,7 +51,7 @@ pub fn run(filename: &str) {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    std::process::exit(0);
+                    std::process::exit(0); // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
                 }
                 Event::KeyDown {keycode: Some(key), .. } => {
                     if let Some(button) = key_map.get(&key) {
@@ -72,32 +72,3 @@ pub fn run(filename: &str) {
     cpu.reset();
     cpu.run();
 }
-
-// fn show_tile(chr_rom: &Vec<u8>, bank: usize, tile_n: usize) -> Frame {
-//     assert!(bank <= 1);
-
-//     let mut frame = Frame::new();
-//     let bank = (bank * 0x1000) as usize;
-//     let tile_base = bank + tile_n * 16;
-//     let tile = &chr_rom[tile_base..(tile_base + 16)];
-
-//     for y in 0..8usize {
-//         let lo = tile[y];
-//         let hi = tile[y + 8];
-
-//         for x in 0..8usize {
-//             let hi = (hi >> (7 - x)) & 0x1;
-//             let lo = (lo >> (7 - x)) & 0x1;
-//             let color = ((hi) << 1) | lo;
-//             let rgb = match color {
-//                 0 => frame::SYSTEM_PALLETE[0x01],
-//                 1 => frame::SYSTEM_PALLETE[0x23],
-//                 2 => frame::SYSTEM_PALLETE[0x27],
-//                 3 => frame::SYSTEM_PALLETE[0x30],
-//                 _ => panic!("color can't be {:02x}", color),
-//             };
-//             frame.set_pixel(x, y, rgb);
-//         }
-//     }
-//     frame
-// }
