@@ -31,14 +31,24 @@ pub fn run(filename: &str) {
     let mut texture = creator.create_texture_target(PixelFormatEnum::RGB24, 256, 240).unwrap();
 
     let mut key_map = HashMap::new();
-    key_map.insert(Keycode::W, joypad::Button::UP);
-    key_map.insert(Keycode::A, joypad::Button::LEFT);
-    key_map.insert(Keycode::S, joypad::Button::DOWN);
-    key_map.insert(Keycode::D, joypad::Button::RIGHT);
-    key_map.insert(Keycode::RShift, joypad::Button::SECLECT);
-    key_map.insert(Keycode::Return, joypad::Button::START);
-    key_map.insert(Keycode::J, joypad::Button::B);
-    key_map.insert(Keycode::K, joypad::Button::A);
+    // P1
+    key_map.insert(Keycode::W, (joypad::Id::P1, joypad::Button::UP));
+    key_map.insert(Keycode::A, (joypad::Id::P1, joypad::Button::LEFT));
+    key_map.insert(Keycode::S, (joypad::Id::P1, joypad::Button::DOWN));
+    key_map.insert(Keycode::D, (joypad::Id::P1, joypad::Button::RIGHT));
+    key_map.insert(Keycode::RShift, (joypad::Id::P1, joypad::Button::SECLECT));
+    key_map.insert(Keycode::Return, (joypad::Id::P1, joypad::Button::START));
+    key_map.insert(Keycode::J, (joypad::Id::P1, joypad::Button::B));
+    key_map.insert(Keycode::K, (joypad::Id::P1, joypad::Button::A));
+    // P2
+    key_map.insert(Keycode::Up, (joypad::Id::P2, joypad::Button::UP));
+    key_map.insert(Keycode::Left, (joypad::Id::P2, joypad::Button::LEFT));
+    key_map.insert(Keycode::Down, (joypad::Id::P2, joypad::Button::DOWN));
+    key_map.insert(Keycode::Right, (joypad::Id::P2, joypad::Button::RIGHT));
+    key_map.insert(Keycode::Kp8, (joypad::Id::P2, joypad::Button::SECLECT));
+    key_map.insert(Keycode::Kp9, (joypad::Id::P2, joypad::Button::START));
+    key_map.insert(Keycode::Kp2, (joypad::Id::P2, joypad::Button::B));
+    key_map.insert(Keycode::Kp3, (joypad::Id::P2, joypad::Button::A));
 
     let rom = std::fs::read(filename).unwrap();
     let rom = Rom::new(&rom).unwrap();
@@ -54,13 +64,13 @@ pub fn run(filename: &str) {
                     std::process::exit(0); // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
                 }
                 Event::KeyDown {keycode: Some(key), .. } => {
-                    if let Some(button) = key_map.get(&key) {
-                        joypad.set_button_pressed(*button, true);
+                    if let Some((id, button)) = key_map.get(&key) {
+                        joypad.set_button_pressed(*id, *button, true);
                     }
                 }
                 Event::KeyUp{keycode: Some(key), .. } => {
-                    if let Some(button) = key_map.get(&key) {
-                        joypad.set_button_pressed(*button, false);
+                    if let Some((id, button)) = key_map.get(&key) {
+                        joypad.set_button_pressed(*id, *button, false);
                     }
                 }
                 _ => {}

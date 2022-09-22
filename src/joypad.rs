@@ -13,21 +13,31 @@ bitflags! {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum Id {
+    P1,
+    P2,
+}
+
 /// The controller operates in 2 modes:
 /// - strobe bit on - controller reports only status of the button A on every read
 /// - strobe bit off - controller cycles through all buttons
 pub struct Joypad {
     strobe: bool,
-    button_idx: u8,
-    button: Button,
+    button_idx_p1: u8,
+    button_idx_p2: u8,
+    button_p1: Button,
+    button_p2: Button,
 }
 
 impl Joypad {
     pub fn new() -> Self {
         Joypad {
             strobe: false,
-            button_idx: 0,
-            button: Button::from_bits_truncate(0),
+            button_idx_p1: 0,
+            button_idx_p2: 0,
+            button_p1: Button::from_bits_truncate(0),
+            button_p2: Button::from_bits_truncate(0),
         }
     }
 
@@ -36,21 +46,29 @@ impl Joypad {
             0x00 => self.strobe = false,
             0x01 => {
                 self.strobe = true;
-                self.button_idx = 0;
+                self.button_idx_p1 = 0;
+                self.button_idx_p2 = 0;
             }
             _ => panic!("can't be here"),
         }
     }
 
-    pub fn read(&mut self) -> u8 {
-        let result = (self.button.bits >> self.button_idx) & 0x1;
+    pub fn read(&mut self, id: Id) -> u8 {
+        let (button_idx, button) = match id {
+            Id::P1 => (&mut self.button_idx_p1, &mut self.button_p1),
+            Id::P2 => (&mut self.button_idx_p2, &mut self.button_p2),
+        };
+        let result = (button.bits >> *button_idx) & 0x1;
         if !self.strobe {
-            self.button_idx = (self.button_idx + 1) % 8;
+            *button_idx = (*button_idx + 1) % 8;
         }
         result
     }
 
-    pub fn set_button_pressed(&mut self, button: Button, pressed: bool) {
-        self.button.set(button, pressed);
+    pub fn set_button_pressed(&mut self, id: Id, button: Button, pressed: bool) {
+        match id {
+            Id::P1 => self.button_p1.set(button, pressed),
+            Id::P2 => self.button_p2.set(button, pressed),
+        }
     }
 }

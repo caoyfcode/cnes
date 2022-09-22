@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::PPU, joypad::Joypad, common::Mem};
+use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::Mem};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -118,11 +118,10 @@ impl Mem for Bus<'_> {
                 0
             }
             0x4016 => {
-                self.joypad.read()
+                self.joypad.read(joypad::Id::P1)
             }
             0x4017 => {
-                println!("Ignoring joypad 2");
-                0
+                self.joypad.read(joypad::Id::P2)
             }
             0x8000..=0xffff => { // PRG ROM
                 self.read_prg_rom(addr)
@@ -170,7 +169,7 @@ impl Mem for Bus<'_> {
                 self.joypad.write(data);
             }
             0x4017 => {
-                println!("Ignoring joypad 2");
+                println!("Ignoring writting to joypad 2");
             }
             0x8000..=0xffff => { // PRG ROM
                 panic!("Attempt to write to Cartridge ROM space")
