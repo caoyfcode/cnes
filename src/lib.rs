@@ -19,7 +19,7 @@ pub fn run(filename: &str) {
     let sdl_ctx = sdl2::init().unwrap();
     let video_sys = sdl_ctx.video().unwrap();
     let win = video_sys
-        .window(filename, 256 * 3, 240 * 3)
+        .window(filename, 256 * 3, 224 * 3)
         .position_centered()
         .build().unwrap();
 
@@ -28,7 +28,7 @@ pub fn run(filename: &str) {
     canvas.set_scale(3.0, 3.0).unwrap();
 
     let creator = canvas.texture_creator();
-    let mut texture = creator.create_texture_target(PixelFormatEnum::RGB24, 256, 240).unwrap();
+    let mut texture = creator.create_texture_target(PixelFormatEnum::RGB24, 256, 224).unwrap();
 
     let mut key_map = HashMap::new();
     // P1
@@ -54,7 +54,7 @@ pub fn run(filename: &str) {
     let rom = Rom::new(&rom).unwrap();
 
     let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad| {
-        texture.update(None, &ppu.frame().data, 256 * 3).unwrap();
+        texture.update(None, &ppu.frame().data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
 
