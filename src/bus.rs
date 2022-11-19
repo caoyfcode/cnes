@@ -72,11 +72,11 @@ impl<'a> Bus<'a> {
     pub fn tick(&mut self, cycles: u8) { // CPU 时钟经过 cycles 个周期
         self.cycles += cycles as u32;
 
-        let nmi_before = self.ppu.nmi_interrupt().is_some();
+        let vblank_started_before = self.ppu.vblank_started();
         self.ppu.tick(3 * cycles);
-        let nmi_after = self.ppu.nmi_interrupt().is_some();
+        let vblank_started_after = self.ppu.vblank_started();
 
-        if !nmi_before && nmi_after {
+        if !vblank_started_before && vblank_started_after {
             (self.frame_callback)(&self.ppu, &mut self.joypad);
         }
     }

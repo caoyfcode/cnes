@@ -120,6 +120,10 @@ impl PPU {
         }
     }
 
+    pub fn vblank_started(&self) -> bool {
+        self.status.contains(StatusRegister::VBLANK_STARTED)
+    }
+
     /// 检查是否生成了 NMI 中断, 检查将自动重置(take)
     pub fn poll_nmi_interrupt(&mut self) -> Option<u8> {
         self.nmi_interrupt.take()
@@ -359,7 +363,8 @@ impl PPU {
         let addr = self.addr.get();
         match addr {
             0..=0x1fff => { // 0..=0b0001_1111_1111_1111
-                panic!("attempt to write to chr rom space {:04x}", addr)
+                // panic!("attempt to write to chr rom space {:04x}", addr)
+                println!("attempt to write to chr rom space {:04x}", addr);
             }
             0x2000..=0x3eff => { // 0b0010_0000_0000_0000..=0b0011_1110_1111_1111
                 let addr = self.vram_mirror_addr(addr);
