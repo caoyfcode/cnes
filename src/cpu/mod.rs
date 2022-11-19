@@ -115,12 +115,6 @@ impl<'a> CPU<'a> {
         }
     }
 
-    pub fn load_and_run(&mut self, program: Vec<u8>) {
-        self.load(program);
-        self.reset();
-        self.run();
-    }
-
     /// 模拟 NES 插入卡带时的动作(RESET 中断)
     /// 1. 状态重置(寄存器与状态寄存器)
     /// 2. 将 PC 寄存器值设为地址 0xFFFC 处的 16 bit 数值
@@ -149,16 +143,6 @@ impl<'a> CPU<'a> {
 
         self.bus.tick(2);
         self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
-    }
-
-    /// 1. 将 ROM 加载至 0x8000 至 0xFFFF
-    /// 2. 设置程序开始地址
-    pub fn load(&mut self, program: Vec<u8>) {
-        // 由于 bus.rs 处不允许写 0x8000..=0xffff, 此函数将引起 panic
-        for i in 0..(program.len() as u16) {
-            self.mem_write(0x8000 + i, program[i as usize]);
-        }
-        self.mem_write_u16(0xFFFC, 0x8000);
     }
 
     pub fn run(&mut self) {
