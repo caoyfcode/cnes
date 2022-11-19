@@ -12,10 +12,9 @@ use cartridge::Rom;
 use cpu::CPU;
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode};
 
-#[macro_use]
-extern crate lazy_static;
 
 pub fn run(filename: &str) {
+    env_logger::init();
     let sdl_ctx = sdl2::init().unwrap();
     let video_sys = sdl_ctx.video().unwrap();
     let win = video_sys
@@ -53,7 +52,11 @@ pub fn run(filename: &str) {
     let rom = std::fs::read(filename).unwrap();
     let rom = Rom::new(&rom).unwrap();
 
+    let mut frame_cnt = 0;
     let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad| {
+        // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
+        log::info!("frame {} start", frame_cnt);
+
         texture.update(None, &ppu.frame().data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
@@ -61,7 +64,7 @@ pub fn run(filename: &str) {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    std::process::exit(0); // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
+                    std::process::exit(0);
                 }
                 Event::KeyDown {keycode: Some(key), .. } => {
                     if let Some((id, button)) = key_map.get(&key) {
@@ -76,6 +79,8 @@ pub fn run(filename: &str) {
                 _ => {}
             }
         }
+        log::info!("frame {} end", frame_cnt);
+        frame_cnt += 1;
     });
 
     let mut cpu = CPU::new(bus);

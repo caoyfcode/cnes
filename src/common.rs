@@ -18,7 +18,7 @@ impl Frame {
             self.data[base + 1] = rgb.1;
             self.data[base + 2] = rgb.2;
         } else {
-            println!("({}, {}) is out of screen", x, y);
+            log::warn!("Attempt to set pixel at ({}, {}) which is out of screen", x, y);
         }
     }
 }

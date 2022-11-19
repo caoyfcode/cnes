@@ -363,8 +363,7 @@ impl PPU {
         let addr = self.addr.get();
         match addr {
             0..=0x1fff => { // 0..=0b0001_1111_1111_1111
-                // panic!("attempt to write to chr rom space {:04x}", addr)
-                println!("attempt to write to chr rom space {:04x}", addr);
+                log::warn!("Attempt to write to chr rom space PPU address {:04x}", addr);
             }
             0x2000..=0x3eff => { // 0b0010_0000_0000_0000..=0b0011_1110_1111_1111
                 let addr = self.vram_mirror_addr(addr);
@@ -383,7 +382,7 @@ impl PPU {
                 }
             }
             _ => {
-                panic!("unexpected access to mirrored space {:04x}", addr)
+                log::warn!("Attempt to write to mirrored space PPU address {:04x}", addr);
             }
         }
         self.addr.increment(self.controller.vram_addr_increment());
@@ -417,7 +416,8 @@ impl PPU {
                 }
             }
             _ => {
-                panic!("unexpected access to mirrored space {:04x}", addr)
+                log::warn!("Attempt to read from mirrored space PPU address {:04x}", addr);
+                0
             }
         }
     }

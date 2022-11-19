@@ -103,7 +103,7 @@ impl Mem for Bus<'_> {
                 self.cpu_vram[mirror_down_addr as usize]
             }
             0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => {
-                println!("Attempt to read from write-only PPU address {:04x}", addr);
+                log::warn!("Attempt to read from write-only PPU address {:04x}", addr);
                 0
             }
             0x2002 => self.ppu.read_status(),
@@ -114,7 +114,7 @@ impl Mem for Bus<'_> {
                 self.mem_read(mirror_down_addr)
             }
             0x4000..=0x4013 | 0x4015 => {
-                println!("Attempt to read from APU Register at {:04x}", addr);
+                log::warn!("Attempt to read from APU Register address {:04x}", addr);
                 0
             }
             0x4016 => {
@@ -127,7 +127,7 @@ impl Mem for Bus<'_> {
                 self.read_prg_rom(addr)
             }
             _ => {
-                println!("Ignoring mem access at {:04x}", addr);
+                log::warn!("Attempt to read from unused memory address {:04x}", addr);
                 0
             }
         }
@@ -142,7 +142,7 @@ impl Mem for Bus<'_> {
             0x2000 => self.ppu.write_to_controller(data),
             0x2001 => self.ppu.write_to_mask(data),
             0x2002 => {
-                println!("Attempt to read from read-only PPU address {:04x}", addr);
+                log::warn!("Attempt to write to read-only PPU address {:04x}", addr);
             }
             0x2003 => self.ppu.write_to_oam_addr(data),
             0x2004 => self.ppu.write_to_oam_data(data),
@@ -163,19 +163,19 @@ impl Mem for Bus<'_> {
                 // TODO 驱动多个 PPU 周期
             }
             0x4000..=0x4013 | 0x4015 => {
-                println!("Ignoring APU Register access at {}", addr);
+                log::warn!("Attempt to write to APU Register address {:04x}", addr);
             }
             0x4016 => {
                 self.joypad.write(data);
             }
             0x4017 => {
-                println!("Ignoring writting to joypad 2");
+                log::warn!("Attempt to write to read-only Joypad 2 address {:04x}", addr);
             }
             0x8000..=0xffff => { // PRG ROM
-                panic!("Attempt to write to Cartridge ROM space")
+                log::warn!("Attempt to write to read-only Cartridge ROM space address {:04x}", addr);
             }
             _ => {
-                println!("Ignoring mem access at {:04x}", addr);
+                log::warn!("Attempt to write to unused memory address {:04x}", addr);
             }
         }
     }
