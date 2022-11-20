@@ -50,3 +50,9 @@ pub trait Mem {
         self.mem_write(addr + 1, hi);
     }
 }
+
+
+/// 按照主频对应周期步进
+pub trait Clock {
+    fn clock(&mut self);
+}

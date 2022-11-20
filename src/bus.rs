@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::Mem};
+use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock}};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -69,18 +69,6 @@ impl<'a> Bus<'a> {
         }
     }
 
-    pub fn tick(&mut self, cycles: u8) { // CPU 时钟经过 cycles 个周期
-        self.cycles += cycles as u32;
-
-        let vblank_started_before = self.ppu.vblank_started();
-        self.ppu.tick(3 * cycles);
-        let vblank_started_after = self.ppu.vblank_started();
-
-        if !vblank_started_before && vblank_started_after {
-            (self.frame_callback)(&self.ppu, &mut self.joypad);
-        }
-    }
-
     // 是否有 NMI 中断传来
     pub fn poll_nmi_status(&mut self) -> Option<u8> {
         self.ppu.poll_nmi_interrupt()
@@ -92,6 +80,20 @@ impl<'a> Bus<'a> {
             idx = idx % 0x4000;
         }
         self.prg_rom[idx as usize]
+    }
+}
+
+impl Clock for Bus<'_> {
+    fn clock(&mut self) {
+        self.cycles += 1;
+
+        let vblank_started_before = self.ppu.vblank_started();
+        self.ppu.clock();
+        let vblank_started_after = self.ppu.vblank_started();
+
+        if !vblank_started_before && vblank_started_after {
+            (self.frame_callback)(&self.ppu, &mut self.joypad);
+        }
     }
 }
 

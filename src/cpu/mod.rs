@@ -3,7 +3,7 @@ pub mod trace;
 
 use std::collections::HashMap;
 use bitflags::bitflags;
-use crate::{bus::Bus, common::Mem};
+use crate::{bus::Bus, common::{Mem, Clock}};
 
 /// # 寻址模式
 /// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
@@ -141,7 +141,8 @@ impl<'a> CPU<'a> {
         self.stack_push(flag.bits);
         self.status.insert(CpuFlags::INTERRUPT_DISABLE);
 
-        self.bus.tick(2);
+        self.bus.clock();
+        self.bus.clock();
         self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
     }
 
@@ -451,7 +452,9 @@ impl<'a> CPU<'a> {
                 self.program_counter += (opcode.len - 1) as u16;
             }
 
-            self.bus.tick(opcode.cycles);
+            for _ in 0..opcode.cycles {
+                self.bus.clock();
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 mod registers;
 mod palette;
 
-use crate::{cartridge::Mirroring, common::{Frame, Rect}};
+use crate::{cartridge::Mirroring, common::{Frame, Rect, Clock}};
 use self::registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister};
 
 
@@ -87,7 +87,7 @@ impl PPU {
         }
     }
 
-    pub fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
+    fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
         self.cycles += cycles as u16;
         if self.cycles >= 341 { // 新的 scanline
             self.cycles = self.cycles - 341;
@@ -427,5 +427,11 @@ impl PPU {
             self.oam_data[self.oam_addr as usize] = *x;
             self.oam_addr = self.oam_addr.wrapping_add(1);
         }
+    }
+}
+
+impl Clock for PPU {
+    fn clock(&mut self) {
+        self.tick(3);
     }
 }
