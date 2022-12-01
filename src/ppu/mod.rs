@@ -431,6 +431,7 @@ impl PPU {
 }
 
 impl Clock for PPU {
+    type Result = ();
     fn clock(&mut self) {
         self.tick(3);
     }

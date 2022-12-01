@@ -84,6 +84,7 @@ impl<'a> Bus<'a> {
 }
 
 impl Clock for Bus<'_> {
+    type Result = ();
     fn clock(&mut self) {
         self.cycles += 1;
 
@@ -164,14 +165,11 @@ impl Mem for Bus<'_> {
                 self.ppu.write_to_oam_dma(&buffer);
                 // TODO 驱动多个 PPU 周期
             }
-            0x4000..=0x4013 | 0x4015 => {
+            0x4000..=0x4013 | 0x4015 | 0x4017 => {
                 log::warn!("Attempt to write to APU Register address {:04x}", addr);
             }
-            0x4016 => {
+            0x4016 => { // 写 0x4016 用来控制所有 joypad
                 self.joypad.write(data);
-            }
-            0x4017 => {
-                log::warn!("Attempt to write to read-only Joypad 2 address {:04x}", addr);
             }
             0x8000..=0xffff => { // PRG ROM
                 log::warn!("Attempt to write to read-only Cartridge ROM space address {:04x}", addr);

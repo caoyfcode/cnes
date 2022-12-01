@@ -52,7 +52,8 @@ pub trait Mem {
 }
 
 
-/// 按照主频对应周期步进
+/// 经过一个 CPU 周期
 pub trait Clock {
-    fn clock(&mut self);
+    type Result; // 有可能需要返回信息
+    fn clock(&mut self) -> Self::Result;
 }
