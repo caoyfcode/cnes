@@ -2,6 +2,7 @@ mod cpu;
 mod bus;
 mod cartridge;
 mod ppu;
+mod apu;
 mod joypad;
 mod common;
 
