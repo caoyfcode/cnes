@@ -1,4 +1,7 @@
 mod frame_counter;
+// 通道
+mod pulse;
+// 通道需要的组件
 mod envelope;
 
 use self::frame_counter::FrameCounter;
