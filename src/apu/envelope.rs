@@ -8,7 +8,7 @@ pub(super) struct Envelope {
     loop_flag: bool,
     constant_volume_flag: bool,
     // 其余组成部分:
-    divider: u8, // 用于控制递减的包络的周期
+    divider_counter: u8, // 用于控制递减的包络的周期
     decay_level_counter: u8,
     // 状态信息
     constant_volume: u8, // 4 bit, constant volume or the reload value for divider
@@ -22,7 +22,7 @@ impl Envelope {
             start_flag: true,
             loop_flag: false,
             constant_volume_flag: true,
-            divider: 0,
+            divider_counter: 0,
             decay_level_counter: Self::DECAY_LEVEL_RESET,
             constant_volume: 0,
         }
@@ -41,17 +41,17 @@ impl Envelope {
     pub(super) fn on_quarter_frame(&mut self) {
         if self.start_flag {
             self.start_flag = false;
-            self.divider = self.constant_volume;
+            self.divider_counter = self.constant_volume;
             self.decay_level_counter = Self::DECAY_LEVEL_RESET;
             return;
         }
         // start_flag is 0
-        if self.divider != 0 {
-            self.divider -= 1;
+        if self.divider_counter != 0 {
+            self.divider_counter -= 1;
             return;
         }
         // divider is 0
-        self.divider = self.constant_volume;
+        self.divider_counter = self.constant_volume;
         if self.decay_level_counter !=0 {
             self.decay_level_counter -= 1;
         } else if self.loop_flag {
