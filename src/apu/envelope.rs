@@ -28,14 +28,22 @@ impl Envelope {
         }
     }
 
+    //// start flag 设为 1
     pub(super) fn set_start_flag(&mut self) {
         self.start_flag = true;
     }
 
-    pub(super) fn write(&mut self, data: u8) {
-        self.loop_flag = data & 0b0010_0000 == 0b0010_0000;
-        self.constant_volume_flag = data & 0b0001_0000 == 0b0001_0000;
-        self.constant_volume = data & 0b1111;
+    pub(super) fn set_loop_flag(&mut self, val: bool) {
+        self.loop_flag = val;
+    }
+
+    pub(super) fn set_constant_volume_flag(&mut self, val: bool) {
+        self.constant_volume_flag = val;
+    }
+
+    /// 4bit constant volume
+    pub(super) fn set_constant_volume(&mut self, val: u8) {
+        self.constant_volume = val;
     }
 
     pub(super) fn on_quarter_frame(&mut self) {

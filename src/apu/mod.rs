@@ -3,8 +3,11 @@ mod frame_counter;
 mod pulse;
 // 通道需要的组件
 mod envelope;
+mod length_counter;
 
-use self::frame_counter::FrameCounter;
+use crate::common::Clock;
+
+use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse};
 
 // 每个通道在每个 CPU 周期生成一个 sample (大约1.8MHz), 各个通道每周期生成 sample 要根据一系列组成部件的状态决定生成什么, 各通道需要用到的部件有:
 // - **Frame Counter(帧计数器)** 用来驱动各通道的 Envelope, Sweep, Length Counter 和 Linear counter, 其每帧会生成 4 次 quarter frame 信号(2 次half frame), 可以工作在4步或5步模式下(step4, step5). 可以(optionally) 在 4 步模式的最后一步发出一次软中断(irq)
@@ -15,10 +18,54 @@ use self::frame_counter::FrameCounter;
 // - **Sequencer(序列生成单元)** 方波与三角波通道有, 用来生成基础波形, 由 Timer 驱动
 // - **Timer** 在所有通道中使用, 用来驱动 Sequencer 生成波形, 可以通过改变 Timer 来控制频率. 其包含一个由 CPU 周期驱动的分频器. 通过分频器, 三角波通道的 Timer 每一个 CPU 周期滴答一次, 其余所有通道每 2 个 CPU 周期滴答一次
 
-struct APU {
+pub(crate) struct APU {
+    // 通道
+    pulse1: Pulse,
+    pulse2: Pulse,
+    // 其他组成部分
     frame_counter: FrameCounter,
+    // 状态信息
+    samples: Vec<f32>,
 }
 
 impl APU {
+    pub(crate) fn new() -> Self {
+        Self {
+            pulse1: Pulse::new(pulse::PulseId::Pulse1),
+            pulse2: Pulse::new(pulse::PulseId::Pulse2),
+            frame_counter: FrameCounter::new(),
+            samples: Vec::new(),
+        }
+    }
 
+    fn generate_a_sample(&mut self) {
+        todo!()
+    }
+
+}
+
+impl Clock for APU {
+    type Result = ();
+
+    fn clock(&mut self) -> Self::Result {
+        let FrameCounterSignal {
+            quarter_frame,
+            half_frame,
+            apu_clock,
+        } = self.frame_counter.clock();
+        if quarter_frame {
+            self.pulse1.on_quarter_frame();
+            self.pulse2.on_quarter_frame();
+        }
+        if half_frame {
+            self.pulse1.on_half_frame();
+            self.pulse2.on_half_frame();
+        }
+        if apu_clock {
+            self.pulse1.on_apu_clock();
+            self.pulse2.on_apu_clock();
+        }
+
+        self.generate_a_sample();
+    }
 }

@@ -6,9 +6,9 @@ enum Mode {
 }
 
 pub(super) struct FrameCounterSignal {
-    quarter_frame: bool, // 约 1/4 帧
-    half_frame: bool, // 约 1/2 帧一次
-    apu_clock: bool, // 每 2 个 cpu clock 一次
+    pub(super) quarter_frame: bool, // 约 1/4 帧
+    pub(super) half_frame: bool, // 约 1/2 帧一次
+    pub(super) apu_clock: bool, // 每 2 个 cpu clock 一次
 }
 
 
