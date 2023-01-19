@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock}};
+use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock}, apu::APU};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -44,25 +44,27 @@ pub struct Bus<'call> {
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
     ppu: PPU,
+    apu: APU,
     joypad: Joypad,
     // 状态信息
     cycles: u32, // CPU 时钟周期
-    frame_callback: Box<dyn FnMut(&PPU, &mut Joypad) + 'call>
+    frame_callback: Box<dyn FnMut(&PPU, &mut Joypad, &[f32]) + 'call>
 }
 
 impl<'a> Bus<'a> {
     pub fn new(rom: Rom) -> Self {
-        Self::new_with_frame_callback(rom, move |_, _| {})
+        Self::new_with_frame_callback(rom, move |_, _, _| {})
     }
 
     pub fn new_with_frame_callback<'call, F>(rom: Rom, frame_callback: F) -> Bus<'call>
     where
-        F: FnMut(&PPU, &mut Joypad) + 'call,
+        F: FnMut(&PPU, &mut Joypad, &[f32]) + 'call,
     {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
+            apu: APU::new(),
             joypad: Joypad::new(),
             cycles: 0,
             frame_callback: Box::from(frame_callback),
@@ -72,6 +74,11 @@ impl<'a> Bus<'a> {
     // 是否有 NMI 中断传来
     pub fn poll_nmi_status(&mut self) -> Option<u8> {
         self.ppu.poll_nmi_interrupt()
+    }
+
+    // 是否有 irq 中断
+    pub(crate) fn poll_irq(&mut self) -> bool {
+        self.apu.poll_irq()
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
@@ -91,9 +98,11 @@ impl Clock for Bus<'_> {
         let vblank_started_before = self.ppu.vblank_started();
         self.ppu.clock();
         let vblank_started_after = self.ppu.vblank_started();
+        self.apu.clock();
 
         if !vblank_started_before && vblank_started_after {
-            (self.frame_callback)(&self.ppu, &mut self.joypad);
+            (self.frame_callback)(&self.ppu, &mut self.joypad, self.apu.samples());
+            self.apu.clear_samples();
         }
     }
 }
@@ -116,10 +125,7 @@ impl Mem for Bus<'_> {
                 let mirror_down_addr = addr & 0b0010_0000_0000_0111; // 0x2000..0x2008 为 PPU Registers
                 self.mem_read(mirror_down_addr)
             }
-            0x4000..=0x4013 | 0x4015 => {
-                log::warn!("Attempt to read from APU Register address {:04x}", addr);
-                0
-            }
+            0x4000..=0x4013 | 0x4015 => self.apu.mem_read(addr),
             0x4016 => {
                 self.joypad.read(joypad::Id::P1)
             }
@@ -165,9 +171,7 @@ impl Mem for Bus<'_> {
                 self.ppu.write_to_oam_dma(&buffer);
                 // TODO 驱动多个 PPU 周期
             }
-            0x4000..=0x4013 | 0x4015 | 0x4017 => {
-                log::warn!("Attempt to write to APU Register address {:04x}", addr);
-            }
+            0x4000..=0x4013 | 0x4015 | 0x4017 => self.apu.mem_write(addr, data),
             0x4016 => { // 写 0x4016 用来控制所有 joypad
                 self.joypad.write(data);
             }

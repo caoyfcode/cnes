@@ -6,24 +6,44 @@ mod apu;
 mod joypad;
 mod common;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, mem::MaybeUninit, time::{Duration, Instant}};
 
 use bus::Bus;
 use cartridge::Rom;
 use cpu::CPU;
-use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode};
+use ringbuf::{Producer, HeapRb, Consumer, SharedRb};
+use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
 
 
 pub fn run(filename: &str) {
     env_logger::init();
     let sdl_ctx = sdl2::init().unwrap();
     let video_sys = sdl_ctx.video().unwrap();
+    let audio_sys = sdl_ctx.audio().unwrap();
+
+    // open a window
     let win = video_sys
         .window(filename, 256 * 3, 224 * 3)
         .position_centered()
         .build().unwrap();
 
-    let mut canvas = win.into_canvas().present_vsync().build().unwrap();
+    // open a playback
+    let desired_spec = AudioSpecDesired {
+        freq: Some(44100),
+        channels: Some(1),  // mono
+        samples: None       // default sample size
+    };
+    let buffer = HeapRb::<f32>::new(261 * 341 * 60 / 3 + 100);
+    let (producer, consumer) = buffer.split();
+    let mut sender = AudioSender::new(producer, (261 * 341 * 60 / 3) as f32, 44100f32);
+    let device = audio_sys.open_playback(
+        None,
+        &desired_spec,
+        |_| AudioReceiver::new(consumer)
+    ).unwrap();
+    device.resume();
+
+    let mut canvas = win.into_canvas().build().unwrap();
     let mut event_pump = sdl_ctx.event_pump().unwrap();
     canvas.set_scale(3.0, 3.0).unwrap();
 
@@ -54,13 +74,16 @@ pub fn run(filename: &str) {
     let rom = Rom::new(&rom).unwrap();
 
     let mut frame_cnt = 0;
-    let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad| {
+    let start = Instant::now();
+    let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad, samples| {
         // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
         log::info!("frame {} start", frame_cnt);
 
         texture.update(None, &ppu.frame().data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
+        log::info!("get {} samples", samples.len());
+        sender.append_samples(samples);
 
         for event in event_pump.poll_iter() {
             match event {
@@ -80,6 +103,11 @@ pub fn run(filename: &str) {
                 _ => {}
             }
         }
+        let now = start.elapsed().as_secs_f32();
+        let last = (frame_cnt + 1) as f32 / 60f32;
+        if last > now {
+            std::thread::sleep(Duration::from_secs_f32(last - now));
+        }
         log::info!("frame {} end", frame_cnt);
         frame_cnt += 1;
     });
@@ -87,4 +115,63 @@ pub fn run(filename: &str) {
     let mut cpu = CPU::new(bus);
     cpu.reset();
     cpu.run();
+}
+
+type SamplesProducer = Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>;
+type SamplesConsumer = Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>;
+
+struct AudioSender {
+    producer: SamplesProducer,
+    input_frequency: f32,
+    output_frequency: f32,
+    fraction: f32,
+}
+
+impl AudioSender {
+    fn new(producer: SamplesProducer, input_frequency: f32, output_frequency: f32) -> Self {
+        Self {
+            producer,
+            input_frequency,
+            output_frequency,
+            fraction: 0f32,
+        }
+    }
+
+    fn append_samples(&mut self, samples: &[f32]) {
+        let ratio = self.input_frequency / self.output_frequency;
+        for sample in samples {
+            while self.fraction <= 0f32 {
+                if self.producer.push(*sample).is_err() { // 样本满了则等待声音线程播放一些
+                   std::thread::sleep(std::time::Duration::from_micros(10));
+                }
+                self.fraction += ratio;
+            }
+            self.fraction -= 1f32;
+        }
+    }
+}
+
+struct AudioReceiver {
+    consumer: SamplesConsumer,
+}
+
+impl AudioReceiver {
+    fn new(consumer: SamplesConsumer) -> Self {
+        Self {
+            consumer
+        }
+    }
+}
+
+impl AudioCallback for AudioReceiver {
+    type Channel = f32;
+
+    fn callback(&mut self, out: &mut [f32]) {
+        for x in out.iter_mut() {
+            *x = match self.consumer.pop() {
+                Some(sample) => sample,
+                None => 0f32,
+            }
+        }
+    }
 }

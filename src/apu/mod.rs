@@ -5,7 +5,7 @@ mod pulse;
 mod envelope;
 mod length_counter;
 
-use crate::common::Clock;
+use crate::common::{Clock, Mem};
 
 use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse};
 
@@ -39,7 +39,49 @@ impl APU {
     }
 
     fn generate_a_sample(&mut self) {
-        todo!()
+        let pulse1 = self.pulse1.output() as f32;
+        let pulse2 = self.pulse2.output() as f32;
+        let pulse1_plus_pulse2 = pulse1 + pulse2;
+        let pulse_out = if pulse1_plus_pulse2 == 0f32 {
+            0f32
+        } else {
+            95.88 / (8128f32 / pulse1_plus_pulse2 + 100f32)
+        };
+        let tnd_out = 0f32;
+        self.samples.push(pulse_out + tnd_out);
+    }
+
+    pub(crate) fn samples(&self) -> &[f32] {
+        &self.samples
+    }
+
+    pub(crate) fn clear_samples(&mut self) {
+        self.samples.clear();
+    }
+
+    pub(crate) fn poll_irq(&mut self) -> bool {
+        self.frame_counter.poll_frame_interrupt()
+    }
+
+    // $4015 read | IF-D NT21 | DMC interrupt (I), frame interrupt (F), DMC active (D), length counter > 0 (N/T/2/1)
+    fn read_status(&mut self) -> u8 {
+        let mut status = 0u8;
+        if self.frame_counter.poll_frame_interrupt() {
+            status |= 0b0100_0000;
+        }
+        if self.pulse2.length_counter() > 0 {
+            status |= 0b0010;
+        }
+        if self.pulse1.length_counter() > 0 {
+            status |= 0b0001;
+        }
+        status
+    }
+
+    // $4015 write | ---D NT21 | Enable DMC (D), noise (N), triangle (T), and pulse channels (2/1)
+    fn write_status(&mut self, data: u8) {
+        self.pulse2.set_enabled_flag(data & 0b0010 == 0b0010);
+        self.pulse1.set_enabled_flag(data & 0b0001 == 0b0001);
     }
 
 }
@@ -67,5 +109,42 @@ impl Clock for APU {
         }
 
         self.generate_a_sample();
+    }
+}
+
+impl Mem for APU {
+    fn mem_read(&mut self, addr: u16) -> u8 {
+        if addr == 0x4015 {
+            self.read_status()
+        } else {
+            log::warn!("Attempt to read from write-only APU Register address {:04x}", addr);
+            0
+        }
+    }
+
+    fn mem_write(&mut self, addr: u16, data: u8) {
+        match addr {
+            // pulse 1
+            0x4000 => self.pulse1.write_ctrl(data),
+            0x4001 => self.pulse1.write_sweep(data),
+            0x4002 => self.pulse1.write_timer_lo(data),
+            0x4003 => self.pulse1.write_length_load_and_timer_hi(data),
+            // pulse 2
+            0x4004 => self.pulse2.write_ctrl(data),
+            0x4005 => self.pulse2.write_sweep(data),
+            0x4006 => self.pulse2.write_timer_lo(data),
+            0x4007 => self.pulse2.write_length_load_and_timer_hi(data),
+            // triangle
+            0x4008 | 0x400a | 0x400b => (),
+            0x4009 => log::warn!("Attempt to write to unused APU Register address {:04x}", addr),
+            // noise
+            0x400c | 0x400e | 0x400f => (),
+            // DMC
+            0x4010 | 0x4011 | 0x4012 | 0x4013 => (),
+            0x4015 => self.write_status(data),
+            // frame counter
+            0x4017 => self.frame_counter.write(data),
+            _ => (),
+        }
     }
 }

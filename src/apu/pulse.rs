@@ -91,6 +91,11 @@ impl Pulse {
         }
     }
 
+    /// Status ($4015) read
+    pub(super) fn length_counter(&self) -> u8 {
+        self.length_counter.counter()
+    }
+
     pub(super) fn on_quarter_frame(&mut self) {
         self.envelope.on_quarter_frame();
     }

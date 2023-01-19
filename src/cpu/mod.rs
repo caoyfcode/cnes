@@ -146,6 +146,24 @@ impl<'a> CPU<'a> {
         self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
     }
 
+    /// IRQ 中断
+    /// 1. 下一条指令地址入栈
+    /// 2. 状态寄存器入栈(UB=10)
+    /// 3. 状态寄存器 I 置 1
+    /// 4. 将 PC 寄存器值设为地址 0xFFFE 处的 16 bit 数值
+    pub fn irq(&mut self) {
+        self.stack_push_u16(self.program_counter); // 下一条指令地址
+        let mut flag = self.status.clone();
+        flag.insert(CpuFlags::BREAK2);
+        flag.remove(CpuFlags::BREAK);
+        self.stack_push(flag.bits);
+        self.status.insert(CpuFlags::INTERRUPT_DISABLE);
+
+        self.bus.clock();
+        self.bus.clock();
+        self.program_counter = self.mem_read_u16(INTERRUPT_IRQ_BRK_VECTOR);
+    }
+
     pub fn run(&mut self) {
         self.run_with_callback(|_| {});
     }
@@ -159,6 +177,8 @@ impl<'a> CPU<'a> {
         loop {
             if let Some(_) = self.bus.poll_nmi_status() {
                 self.nmi();
+            } else if self.bus.poll_irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
+                self.irq();
             }
             callback(self);
             let code = self.mem_read(self.program_counter);
