@@ -33,9 +33,9 @@ pub fn run(filename: &str) {
         channels: Some(1),  // mono
         samples: None       // default sample size
     };
-    let buffer = HeapRb::<f32>::new(261 * 341 * 60 / 3 + 100);
+    let buffer = HeapRb::<f32>::new(262 * 341 * 60 / 3 + 100);
     let (producer, consumer) = buffer.split();
-    let mut sender = AudioSender::new(producer, (261 * 341 * 60 / 3) as f32, 44100f32);
+    let mut sender = AudioSender::new(producer, (262 * 341 * 60 / 3) as f32, 44100f32);
     let device = audio_sys.open_playback(
         None,
         &desired_spec,

@@ -1,13 +1,14 @@
 mod frame_counter;
 // 通道
 mod pulse;
+mod triangle;
 // 通道需要的组件
 mod envelope;
 mod length_counter;
 
 use crate::common::{Clock, Mem};
 
-use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse};
+use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse, triangle::Triangle};
 
 // 每个通道在每个 CPU 周期生成一个 sample (大约1.8MHz), 各个通道每周期生成 sample 要根据一系列组成部件的状态决定生成什么, 各通道需要用到的部件有:
 // - **Frame Counter(帧计数器)** 用来驱动各通道的 Envelope, Sweep, Length Counter 和 Linear counter, 其每帧会生成 4 次 quarter frame 信号(2 次half frame), 可以工作在4步或5步模式下(step4, step5). 可以(optionally) 在 4 步模式的最后一步发出一次软中断(irq)
@@ -22,6 +23,7 @@ pub(crate) struct APU {
     // 通道
     pulse1: Pulse,
     pulse2: Pulse,
+    triangle: Triangle,
     // 其他组成部分
     frame_counter: FrameCounter,
     // 状态信息
@@ -33,6 +35,7 @@ impl APU {
         Self {
             pulse1: Pulse::new(pulse::PulseId::Pulse1),
             pulse2: Pulse::new(pulse::PulseId::Pulse2),
+            triangle: Triangle::new(),
             frame_counter: FrameCounter::new(),
             samples: Vec::new(),
         }
@@ -47,7 +50,15 @@ impl APU {
         } else {
             95.88 / (8128f32 / pulse1_plus_pulse2 + 100f32)
         };
-        let tnd_out = 0f32;
+        let triangle = self.triangle.output() as f32;
+        let noise = 0f32;
+        let dmc = 0f32;
+        let tnd_plus = triangle / 8227f32 + noise / 12241f32 + dmc / 22638f32;
+        let tnd_out = if tnd_plus == 0f32 {
+            0f32
+        } else {
+            159.79 / (1f32 / tnd_plus + 100f32)
+        };
         self.samples.push(pulse_out + tnd_out);
     }
 
@@ -98,15 +109,18 @@ impl Clock for APU {
         if quarter_frame {
             self.pulse1.on_quarter_frame();
             self.pulse2.on_quarter_frame();
+            self.triangle.on_quarter_frame();
         }
         if half_frame {
             self.pulse1.on_half_frame();
             self.pulse2.on_half_frame();
+            self.triangle.on_half_frame();
         }
         if apu_clock {
             self.pulse1.on_apu_clock();
             self.pulse2.on_apu_clock();
         }
+        self.triangle.on_clock();
 
         self.generate_a_sample();
     }
