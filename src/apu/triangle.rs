@@ -49,6 +49,19 @@ impl Triangle {
         }
     }
 
+    /// Status ($4015)
+    pub(super) fn set_enabled_flag(&mut self, enabled: bool) {
+        self.enabled_flag = enabled;
+        if !enabled {
+            self.length_counter.clear_counter();
+        }
+    }
+
+    /// Status ($4015) read
+    pub(super) fn length_counter(&self) -> u8 {
+        self.length_counter.counter()
+    }
+
     pub(super) fn on_clock(&mut self) {
         // timer 滴答
         if self.timer_counter != 0 {

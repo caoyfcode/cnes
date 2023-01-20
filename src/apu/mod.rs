@@ -80,6 +80,9 @@ impl APU {
         if self.frame_counter.poll_frame_interrupt() {
             status |= 0b0100_0000;
         }
+        if self.triangle.length_counter() > 0 {
+            status |= 0b0100;
+        }
         if self.pulse2.length_counter() > 0 {
             status |= 0b0010;
         }
@@ -91,6 +94,7 @@ impl APU {
 
     // $4015 write | ---D NT21 | Enable DMC (D), noise (N), triangle (T), and pulse channels (2/1)
     fn write_status(&mut self, data: u8) {
+        self.triangle.set_enabled_flag(data & 0b0100 == 0b0100);
         self.pulse2.set_enabled_flag(data & 0b0010 == 0b0010);
         self.pulse1.set_enabled_flag(data & 0b0001 == 0b0001);
     }
@@ -149,7 +153,9 @@ impl Mem for APU {
             0x4006 => self.pulse2.write_timer_lo(data),
             0x4007 => self.pulse2.write_length_load_and_timer_hi(data),
             // triangle
-            0x4008 | 0x400a | 0x400b => (),
+            0x4008 => self.triangle.write_linear_counter(data),
+            0x400a => self.triangle.write_timer_lo(data),
+            0x400b => self.triangle.write_length_load_and_timer_hi(data),
             0x4009 => log::warn!("Attempt to write to unused APU Register address {:04x}", addr),
             // noise
             0x400c | 0x400e | 0x400f => (),
