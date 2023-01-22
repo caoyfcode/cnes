@@ -28,8 +28,10 @@ impl Triangle {
     }
 
     // $4008 CRRR.RRRR Linear counter setup (write)
+    // $4008 Hlll.llll Triangle channel length counter halt and linear counter load (write)
     pub(super) fn write_linear_counter(&mut self, data: u8) {
         self.linear_counter.set_control_and_reload_value(data);
+        self.length_counter.set_halt_flag(data & 0b1000_0000 == 0b1000_0000)
     }
 
     // $400A timer low 8 bits
