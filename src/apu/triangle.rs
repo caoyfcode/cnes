@@ -87,11 +87,7 @@ impl Triangle {
 
     pub(super) fn output(&self) -> u8 {
         // 这里不判断两个 counter, 该通道因 counter 静音的原理是 counter 为 0, step 就不变了
-        if self.enabled_flag {
-            Self::WAVE_TABLE[self.sequencer_step]
-        } else {
-            0
-        }
+        Self::WAVE_TABLE[self.sequencer_step]
     }
 }
 
