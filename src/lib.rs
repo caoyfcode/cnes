@@ -6,12 +6,12 @@ mod apu;
 mod joypad;
 mod common;
 
-use std::{collections::HashMap, sync::Arc, mem::MaybeUninit, time::{Duration, Instant}};
+use std::{collections::HashMap, time::{Duration, Instant}};
 
 use bus::Bus;
 use cartridge::Rom;
 use cpu::CPU;
-use ringbuf::{Producer, HeapRb, Consumer, SharedRb};
+use ringbuf::{HeapRb, HeapProducer, HeapConsumer};
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
 
 
@@ -117,18 +117,15 @@ pub fn run(filename: &str) {
     cpu.run();
 }
 
-type SamplesProducer = Producer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>;
-type SamplesConsumer = Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>;
-
 struct AudioSender {
-    producer: SamplesProducer,
+    producer: HeapProducer<f32>,
     input_frequency: f32,
     output_frequency: f32,
     fraction: f32,
 }
 
 impl AudioSender {
-    fn new(producer: SamplesProducer, input_frequency: f32, output_frequency: f32) -> Self {
+    fn new(producer: HeapProducer<f32>, input_frequency: f32, output_frequency: f32) -> Self {
         Self {
             producer,
             input_frequency,
@@ -152,11 +149,11 @@ impl AudioSender {
 }
 
 struct AudioReceiver {
-    consumer: SamplesConsumer,
+    consumer: HeapConsumer<f32>,
 }
 
 impl AudioReceiver {
-    fn new(consumer: SamplesConsumer) -> Self {
+    fn new(consumer: HeapConsumer<f32>) -> Self {
         Self {
             consumer
         }
