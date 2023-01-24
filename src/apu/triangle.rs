@@ -85,9 +85,13 @@ impl Triangle {
         self.length_counter.on_half_frame();
     }
 
-    pub(super) fn output(&self) -> u8 {
-        // 这里不判断两个 counter, 该通道因 counter 静音的原理是 counter 为 0, step 就不变了
-        Self::WAVE_TABLE[self.sequencer_step]
+    pub(super) fn output(&self) -> f32 {
+        if self.timer_reset < 2 && self.length_counter() != 0 { // 超声波
+            7.5f32
+        } else {
+            // 这里不判断两个 counter, 该通道因 counter 静音的原理是 counter 为 0, step 就不变了
+            Self::WAVE_TABLE[self.sequencer_step] as f32
+        }
     }
 }
 
