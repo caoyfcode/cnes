@@ -2,13 +2,14 @@ mod frame_counter;
 // 通道
 mod pulse;
 mod triangle;
+mod noise;
 // 通道需要的组件
 mod envelope;
 mod length_counter;
 
 use crate::common::{Clock, Mem};
 
-use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse, triangle::Triangle};
+use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse, triangle::Triangle, noise::Noise};
 
 // 每个通道在每个 CPU 周期生成一个 sample (大约1.8MHz), 各个通道每周期生成 sample 要根据一系列组成部件的状态决定生成什么, 各通道需要用到的部件有:
 // - **Frame Counter(帧计数器)** 用来驱动各通道的 Envelope, Sweep, Length Counter 和 Linear counter, 其每帧会生成 4 次 quarter frame 信号(2 次half frame), 可以工作在4步或5步模式下(step4, step5). 可以(optionally) 在 4 步模式的最后一步发出一次软中断(irq)
@@ -24,6 +25,7 @@ pub(crate) struct APU {
     pulse1: Pulse,
     pulse2: Pulse,
     triangle: Triangle,
+    noise: Noise,
     // 其他组成部分
     frame_counter: FrameCounter,
     // 状态信息
@@ -36,6 +38,7 @@ impl APU {
             pulse1: Pulse::new(pulse::PulseId::Pulse1),
             pulse2: Pulse::new(pulse::PulseId::Pulse2),
             triangle: Triangle::new(),
+            noise: Noise::new(),
             frame_counter: FrameCounter::new(),
             samples: Vec::new(),
         }
@@ -51,7 +54,7 @@ impl APU {
             95.88 / (8128f32 / pulse1_plus_pulse2 + 100f32)
         };
         let triangle = self.triangle.output() as f32;
-        let noise = 0f32;
+        let noise = self.noise.output() as f32;
         let dmc = 0f32;
         let tnd_plus = triangle / 8227f32 + noise / 12241f32 + dmc / 22638f32;
         let tnd_out = if tnd_plus == 0f32 {
@@ -80,6 +83,9 @@ impl APU {
         if self.frame_counter.poll_frame_interrupt() {
             status |= 0b0100_0000;
         }
+        if self.noise.length_counter() > 0 {
+            status |= 0b1000;
+        }
         if self.triangle.length_counter() > 0 {
             status |= 0b0100;
         }
@@ -94,6 +100,7 @@ impl APU {
 
     // $4015 write | ---D NT21 | Enable DMC (D), noise (N), triangle (T), and pulse channels (2/1)
     fn write_status(&mut self, data: u8) {
+        self.noise.set_enabled_flag(data & 0b1000 == 0b1000);
         self.triangle.set_enabled_flag(data & 0b0100 == 0b0100);
         self.pulse2.set_enabled_flag(data & 0b0010 == 0b0010);
         self.pulse1.set_enabled_flag(data & 0b0001 == 0b0001);
@@ -114,15 +121,18 @@ impl Clock for APU {
             self.pulse1.on_quarter_frame();
             self.pulse2.on_quarter_frame();
             self.triangle.on_quarter_frame();
+            self.noise.on_quarter_frame();
         }
         if half_frame {
             self.pulse1.on_half_frame();
             self.pulse2.on_half_frame();
             self.triangle.on_half_frame();
+            self.noise.on_half_frame();
         }
         if apu_clock {
             self.pulse1.on_apu_clock();
             self.pulse2.on_apu_clock();
+            self.noise.on_apu_clock();
         }
         self.triangle.on_clock();
 
@@ -158,7 +168,10 @@ impl Mem for APU {
             0x400b => self.triangle.write_length_load_and_timer_hi(data),
             0x4009 => log::warn!("Attempt to write to unused APU Register address {:04x}", addr),
             // noise
-            0x400c | 0x400e | 0x400f => (),
+            0x400c => self.noise.write_ctrl(data),
+            0x400e => self.noise.write_mode_and_period(data),
+            0x400f => self.noise.write_length_counter_load(data),
+            0x400d => log::warn!("Attempt to write to unused APU Register address {:04x}", addr),
             // DMC
             0x4010 | 0x4011 | 0x4012 | 0x4013 => (),
             0x4015 => self.write_status(data),
