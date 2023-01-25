@@ -10,7 +10,6 @@ pub(super) enum PulseId {
 
 /// 方波通道
 pub(super) struct Pulse {
-    enabled_flag: bool, // 将 enabled flag 清零将导致 length counter 清零
     envelope: Envelope,
     sweep: Sweep,
     timer_reset: u16, // 11bit timer, 用于控制频率
@@ -30,7 +29,6 @@ impl Pulse {
 
     pub(super) fn new(pulse_id: PulseId) -> Self {
         Self {
-            enabled_flag: true,
             envelope: Envelope::new(),
             sweep: Sweep::new(pulse_id),
             timer_reset: 0,
@@ -78,17 +76,12 @@ impl Pulse {
         self.timer_counter = self.timer_reset;
         self.sequencer_step = 0;
         self.envelope.set_start_flag();
-        if self.enabled_flag {
-            self.length_counter.load(data >> 3);
-        }
+        self.length_counter.load_if_enabled_flag(data >> 3);
     }
 
     /// Status ($4015)
     pub(super) fn set_enabled_flag(&mut self, enabled: bool) {
-        self.enabled_flag = enabled;
-        if !enabled {
-            self.length_counter.clear_counter();
-        }
+        self.length_counter.set_enabled_flag(enabled);
     }
 
     /// Status ($4015) read

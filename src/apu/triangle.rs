@@ -2,7 +2,6 @@ use super::length_counter::LengthCounter;
 
 
 pub(super) struct Triangle {
-    enabled_flag: bool, // 将 enabled flag 清零将导致 length counter 清零
     linear_counter: LinearCounter,
     length_counter: LengthCounter,
     timer_reset: u16, // 11bit timer, 用于控制频率
@@ -18,7 +17,6 @@ impl Triangle {
 
     pub(super) fn new() -> Self {
         Self {
-            enabled_flag: true,
             linear_counter: LinearCounter::new(),
             length_counter: LengthCounter::new(),
             timer_reset: 0,
@@ -46,17 +44,12 @@ impl Triangle {
         self.timer_reset = (((data & 0b111) as u16) << 8) | (self.timer_reset & 0xff);
         self.timer_counter = self.timer_reset;
         self.linear_counter.set_reload_flag();
-        if self.enabled_flag {
-            self.length_counter.load(data >> 3);
-        }
+        self.length_counter.load_if_enabled_flag(data >> 3);
     }
 
     /// Status ($4015)
     pub(super) fn set_enabled_flag(&mut self, enabled: bool) {
-        self.enabled_flag = enabled;
-        if !enabled {
-            self.length_counter.clear_counter();
-        }
+        self.length_counter.set_enabled_flag(enabled);
     }
 
     /// Status ($4015) read
