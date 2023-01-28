@@ -89,7 +89,9 @@ impl FrameCounter {
 
         self.step = 0;
         self.cycles = 0;
-        self.frame_interrupt_flag = false;
+        if self.interrupt_inhibit_flag {
+            self.frame_interrupt_flag = false;
+        }
     }
 
     // 取出 frame interrupt 并置 0
