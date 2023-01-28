@@ -76,9 +76,8 @@ impl<'a> Bus<'a> {
         self.ppu.poll_nmi_interrupt()
     }
 
-    // 是否有 irq 中断
-    pub(crate) fn poll_irq(&mut self) -> bool {
-        self.apu.poll_irq()
+    pub(crate) fn irq(&self) -> bool {
+        self.apu.irq()
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
@@ -99,6 +98,11 @@ impl Clock for Bus<'_> {
         self.ppu.clock();
         let vblank_started_after = self.ppu.vblank_started();
         self.apu.clock();
+
+        if let Some(addr) = self.apu.request_dma() {
+            let data = self.mem_read(addr);
+            self.apu.load_dma_data(data);
+        }
 
         if !vblank_started_before && vblank_started_after {
             (self.frame_callback)(&self.ppu, &mut self.joypad, self.apu.samples());

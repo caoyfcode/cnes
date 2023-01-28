@@ -94,11 +94,15 @@ impl FrameCounter {
         }
     }
 
-    // 取出 frame interrupt 并置 0
+    // 取出 frame interrupt 并置 0, 0x4015 read 使用
     pub(super) fn poll_frame_interrupt(&mut self) -> bool {
         let ret = self.frame_interrupt_flag;
         self.frame_interrupt_flag = false;
         ret
+    }
+
+    pub(super) fn frame_interrupt(&self) -> bool {
+        self.frame_interrupt_flag
     }
 
 }

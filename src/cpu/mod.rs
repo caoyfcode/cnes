@@ -177,7 +177,7 @@ impl<'a> CPU<'a> {
         loop {
             if let Some(_) = self.bus.poll_nmi_status() {
                 self.nmi();
-            } else if self.bus.poll_irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
+            } else if self.bus.irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
                 self.irq();
             }
             callback(self);
