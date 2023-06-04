@@ -168,41 +168,62 @@ impl PPU {
     /// 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
     fn update_background(&mut self) {
         let scroll_x = self.scroll.scroll_x as usize;
-        let scroll_y = self.scroll.scroll_y as usize;
+        let scroll_y = if self.scroll.scroll_y >= Frame::HEIGHT as u8 {
+            //  "Normal" vertical offsets range from 0 to 239, while values of 240 to 255 are treated as -16 through -1 in a way, but tile data is incorrectly fetched from the attribute table.
+            let scroll_y = self.scroll.scroll_y as i8; // 转为负数
+            let scroll_y = Frame::HEIGHT as isize + scroll_y as isize; // 取模
+            scroll_y as usize
+        } else {
+            self.scroll.scroll_y as usize
+        };
 
-        let (main_nametable, second_nametable): (usize, usize) = match (&self.mirroring, self.controller.base_nametable_address()) {
+        let (base_nametable, other_nametable): (usize, usize) = match (&self.mirroring, self.controller.base_nametable_address()) {
             (_, 0x2000) | (Mirroring::VERTICAL, 0x2800) | (Mirroring::HORIZONTAL, 0x2400) => (0, 0x0400),
             (_, 0x2c00) | (Mirroring::VERTICAL, 0x2400) | (Mirroring::HORIZONTAL, 0x2800) => (0x0400, 0),
             (_, _) => {
                 panic!("Not supported mirroring type {:?}", &self.mirroring);
             }
         };
+        let (right_nametable, down_namatable) = match &self.mirroring {
+            Mirroring::HORIZONTAL => (base_nametable, other_nametable),
+            Mirroring::VERTICAL => (other_nametable, base_nametable),
+            _ => panic!("can't be here")
+        };
 
+        // 绘制四部分到 Frame
         self.update_nametable_to_frame(
-            main_nametable,
+            base_nametable,
             Rect { left: scroll_x, top: scroll_y, right: Frame::WIDTH, bottom: Frame::HEIGHT },
-            - (scroll_x as isize), - (scroll_y as isize)
+            0, 0
         );
-
-
         if scroll_x > 0 {
             self.update_nametable_to_frame(
-                second_nametable,
-                Rect { left: 0, top: 0, right: scroll_x, bottom: Frame::HEIGHT },
-                Frame::WIDTH as isize - scroll_x as isize, 0
+                right_nametable,
+                Rect { left: 0, top: scroll_y, right: scroll_x, bottom: Frame::HEIGHT },
+                Frame::WIDTH - scroll_x, 0
             );
-        } else if scroll_y > 0 {
+        }
+        if scroll_y > 0 {
             self.update_nametable_to_frame(
-                second_nametable,
-                Rect { left: 0, top: 0, right: Frame::WIDTH, bottom: scroll_y },
-                0, Frame::HEIGHT as isize - scroll_y as isize
+                down_namatable,
+                Rect { left: scroll_x, top: 0, right: Frame::WIDTH, bottom: scroll_y },
+                0, Frame::HEIGHT - scroll_y
+            );
+        }
+        if scroll_x >0 && scroll_y > 0 {
+            self.update_nametable_to_frame(
+                other_nametable,
+                Rect { left: 0, top: 0, right: scroll_x, bottom: scroll_y },
+                Frame::WIDTH - scroll_x, Frame::HEIGHT - scroll_y
             );
         }
 
     }
 
-    // 将 nametable 的 src 部分(以pixel为单位) shift(以pixel为单位) 后绘制到 frame 对应位置
-    fn update_nametable_to_frame(&mut self, nametable_base: usize, src: Rect, shift_x: isize, shift_y: isize) {
+    // 将 nametable 的 src 部分(以pixel为单位) 绘制到 frame 的 (dest_left, dest_top) 位置, 并且左闭右开，上闭下开
+    fn update_nametable_to_frame(&mut self, nametable_base: usize, src: Rect, dest_left: usize, dest_top: usize) {
+        let shift_x = dest_left as isize - src.left as isize;
+        let shift_y = dest_top as isize - src.top as isize;
         let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
         let bank_base = bank * 0x1000;
 
