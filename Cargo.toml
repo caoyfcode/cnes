@@ -7,11 +7,11 @@ edition = "2021"
 
 [[bin]]
 name = "cnes"
-required-features = ["player"]
+required-features = ["simple_run"]
 
 [features]
-default = ["player"]
-player = ["dep:sdl2", "dep:env_logger", "dep:ringbuf"]
+default = ["simple_run"]
+simple_run = ["dep:sdl2", "dep:env_logger", "dep:ringbuf"]
 
 [dependencies]
 lazy_static = "1.4.0"

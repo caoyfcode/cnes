@@ -5,8 +5,8 @@ mod ppu;
 mod apu;
 mod joypad;
 mod common;
-#[cfg(feature="player")]
-mod player;
+#[cfg(feature="simple_run")]
+mod simple_run;
 
-#[cfg(feature="player")]
-pub use player::run as run;
+#[cfg(feature="simple_run")]
+pub use simple_run::run as run;
