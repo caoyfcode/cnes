@@ -31,7 +31,21 @@ pub(crate) struct APU {
     // 其他组成部分
     frame_counter: FrameCounter,
     // 状态信息
-    samples: Vec<f32>,
+    samples: Samples,
+}
+
+pub struct Samples {
+    data: Vec<f32>
+}
+
+impl Samples {
+    pub fn data(&self) -> &[f32] {
+        &self.data
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear()
+    }
 }
 
 impl APU {
@@ -43,7 +57,7 @@ impl APU {
             noise: Noise::new(),
             dmc: Dmc::new(),
             frame_counter: FrameCounter::new(),
-            samples: Vec::new(),
+            samples: Samples { data: Vec::new() },
         }
     }
 
@@ -65,15 +79,11 @@ impl APU {
         } else {
             159.79 / (1f32 / tnd_plus + 100f32)
         };
-        self.samples.push(pulse_out + tnd_out);
+        self.samples.data.push(pulse_out + tnd_out);
     }
 
-    pub(crate) fn samples(&self) -> &[f32] {
-        &self.samples
-    }
-
-    pub(crate) fn clear_samples(&mut self) {
-        self.samples.clear();
+    pub(crate) fn mut_samples(&mut self) -> &mut Samples {
+        &mut self.samples
     }
 
     pub(crate) fn irq(&self) -> bool {

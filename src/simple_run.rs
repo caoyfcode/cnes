@@ -8,7 +8,7 @@ use ringbuf::{HeapRb, HeapProducer, HeapConsumer};
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
 
 
-pub fn run(filename: &str) {
+pub fn run(rom_filename: &str) {
     env_logger::init();
     let sdl_ctx = sdl2::init().unwrap();
     let video_sys = sdl_ctx.video().unwrap();
@@ -16,7 +16,7 @@ pub fn run(filename: &str) {
 
     // open a window
     let win = video_sys
-        .window(filename, 256 * 3, 224 * 3)
+        .window(rom_filename, 256 * 3, 224 * 3)
         .position_centered()
         .build().unwrap();
 
@@ -63,20 +63,26 @@ pub fn run(filename: &str) {
     key_map.insert(Keycode::Kp2, (joypad::Id::P2, joypad::Button::B));
     key_map.insert(Keycode::Kp3, (joypad::Id::P2, joypad::Button::A));
 
-    let rom = std::fs::read(filename).unwrap();
-    let rom = Rom::new(&rom).unwrap();
+    let rom_bytes = std::fs::read(rom_filename).unwrap();
+    let rom = Rom::new(&rom_bytes).unwrap();
+    let bus = Bus::new(rom);
+    let mut cpu = CPU::new(bus);
+    cpu.reset();
 
     let mut frame_cnt = 0;
     let start = Instant::now();
-    let bus = Bus::new_with_frame_callback(rom, move |ppu, joypad, samples| {
-        // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
-        log::info!("frame {} start", frame_cnt);
 
-        texture.update(None, &ppu.frame().data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
+    loop {
+        cpu.run_next_frame();
+        // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
+        log::info!("frame {} handle start", frame_cnt);
+        let (frame, joypad, samples) = cpu.io_interface();
+        texture.update(None, &frame.data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
-        log::info!("get {} samples", samples.len());
-        sender.append_samples(samples);
+        log::info!("get {} samples", samples.data().len());
+        sender.append_samples(samples.data());
+        samples.clear();
 
         for event in event_pump.poll_iter() {
             match event {
@@ -101,13 +107,9 @@ pub fn run(filename: &str) {
         if last > now {
             std::thread::sleep(Duration::from_secs_f32(last - now));
         }
-        log::info!("frame {} end", frame_cnt);
+        log::info!("frame {} handle end", frame_cnt);
         frame_cnt += 1;
-    });
-
-    let mut cpu = CPU::new(bus);
-    cpu.reset();
-    cpu.run();
+    }
 }
 
 struct AudioSender {

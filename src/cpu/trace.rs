@@ -122,7 +122,7 @@ pub fn trace(cpu: &mut CPU) -> String {
 }
 
 // 不显示 mem_val (可以避免读 PPU 寄存器导致状态改变)
-pub fn trace_without_content(cpu: &mut CPU) -> String {
+pub fn trace_readonly(cpu: &mut CPU) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
@@ -241,6 +241,17 @@ mod tests {
     use crate::bus::Bus;
     use crate::cartridge::tests::test_rom;
 
+    impl CPU {
+        pub fn run_with_trace_until_brk<F>(&mut self, mut trace: F)
+        where
+            F: FnMut(&mut CPU)
+        {
+            while !self.brk_flag {
+                self.run_next_instruction_with_trace(|cpu| trace(cpu));
+            }
+        }
+    }
+
     #[test]
     fn test_format_trace() {
         let mut bus = Bus::new(test_rom());
@@ -256,7 +267,7 @@ mod tests {
         cpu.register_x = 2;
         cpu.register_y = 3;
         let mut result: Vec<String> = vec![];
-        cpu.run_with_callback(|cpu| {
+        cpu.run_with_trace_until_brk(|cpu| {
             result.push(trace(cpu));
         });
         assert_eq!(
@@ -291,7 +302,7 @@ mod tests {
         cpu.program_counter = 0x64;
         cpu.register_y = 0;
         let mut result: Vec<String> = vec![];
-        cpu.run_with_callback(|cpu| {
+        cpu.run_with_trace_until_brk(|cpu| {
             result.push(trace(cpu));
         });
         assert_eq!(

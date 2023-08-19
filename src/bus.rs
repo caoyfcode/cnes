@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock}, apu::APU};
+use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock, Frame}, apu::{APU, Samples}};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -39,7 +39,7 @@ use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Cloc
 // Data:       0x2007
 // OAM DMA:    0x4014
 
-pub struct Bus<'call> {
+pub struct Bus {
     // 组成
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
@@ -48,26 +48,17 @@ pub struct Bus<'call> {
     joypad: Joypad,
     // 状态信息
     cycles: u32, // CPU 时钟周期
-    frame_callback: Box<dyn FnMut(&PPU, &mut Joypad, &[f32]) + 'call>
 }
 
-impl<'a> Bus<'a> {
-    pub fn new(rom: Rom) -> Self {
-        Self::new_with_frame_callback(rom, move |_, _, _| {})
-    }
-
-    pub fn new_with_frame_callback<'call, F>(rom: Rom, frame_callback: F) -> Bus<'call>
-    where
-        F: FnMut(&PPU, &mut Joypad, &[f32]) + 'call,
-    {
+impl Bus {
+    pub fn new(rom: Rom) -> Bus {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
             apu: APU::new(),
             joypad: Joypad::new(),
-            cycles: 0,
-            frame_callback: Box::from(frame_callback),
+            cycles: 0
         }
     }
 
@@ -87,11 +78,19 @@ impl<'a> Bus<'a> {
         }
         self.prg_rom[idx as usize]
     }
+
+    pub(crate) fn io_interface(&mut self) -> (&Frame, &mut Joypad, &mut Samples) {
+        (
+            self.ppu.frame(),
+            &mut self.joypad,
+            self.apu.mut_samples()
+        )
+    }
 }
 
-impl Clock for Bus<'_> {
-    type Result = ();
-    fn clock(&mut self) {
+impl Clock for Bus {
+    type Result = bool; // 返回值表示是否到达帧末
+    fn clock(&mut self) -> bool {
         self.cycles += 1;
 
         let vblank_started_before = self.ppu.vblank_started();
@@ -104,14 +103,11 @@ impl Clock for Bus<'_> {
             self.apu.load_dma_data(data);
         }
 
-        if !vblank_started_before && vblank_started_after {
-            (self.frame_callback)(&self.ppu, &mut self.joypad, self.apu.samples());
-            self.apu.clear_samples();
-        }
+        !vblank_started_before && vblank_started_after
     }
 }
 
-impl Mem for Bus<'_> {
+impl Mem for Bus {
     fn mem_read(&mut self, addr: u16) -> u8 {
         match addr {
             0..=0x1fff => { // CPU VRAM

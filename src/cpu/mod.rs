@@ -1,9 +1,10 @@
 mod opcodes;
 pub mod trace;
 
-use std::collections::HashMap;
 use bitflags::bitflags;
-use crate::{bus::Bus, common::{Mem, Clock}};
+use crate::{bus::Bus, common::{Mem, Clock, Frame}, joypad::Joypad, apu::Samples};
+
+use self::opcodes::OPCODES_MAP;
 
 /// # 寻址模式
 /// 6502 有 <del>15</del> 13 种寻址模式, 不实现的寻址模式在相应的指令实现处实现
@@ -68,14 +69,16 @@ bitflags! {
 
 /// # CPU struct
 /// `status`: NV-BDIZC(Negative, Overflow, Break, Decimal, Interrupt Disable, Zero, Carry)
-pub struct CPU<'a> {
-    pub register_a: u8,
-    pub register_x: u8,
-    pub register_y: u8,
-    pub status: CpuFlags,
-    pub program_counter: u16,
-    pub stack_pointer: u8,  // 指向空位置
-    pub bus: Bus<'a>, // 总线(连接CPU RAM, PPU, Rom 等)
+pub struct CPU {
+    register_a: u8,
+    register_x: u8,
+    register_y: u8,
+    status: CpuFlags,
+    program_counter: u16,
+    stack_pointer: u8,  // 指向空位置
+    bus: Bus, // 总线(连接CPU RAM, PPU, Rom 等)
+
+    brk_flag: bool,
 }
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
@@ -84,7 +87,7 @@ const INTERRUPT_RESET_VECTOR: u16 = 0xfffc;
 const INTERRUPT_NMI_VECTOR: u16 = 0xfffa;
 const INTERRUPT_IRQ_BRK_VECTOR: u16 = 0xfffe;
 
-impl Mem for CPU<'_> {
+impl Mem for CPU {
     fn mem_read(&mut self, addr: u16) -> u8 {
         self.bus.mem_read(addr)
     }
@@ -102,8 +105,8 @@ impl Mem for CPU<'_> {
     }
 }
 
-impl<'a> CPU<'a> {
-    pub fn new(bus: Bus<'a>) -> Self {
+impl CPU {
+    pub fn new(bus: Bus) -> Self {
         CPU {
             register_a: 0,
             register_x: 0,
@@ -112,8 +115,52 @@ impl<'a> CPU<'a> {
             program_counter: 0,
             stack_pointer: STACK_RESET,
             bus,
+            brk_flag: false
         }
     }
+
+    pub fn io_interface(&mut self) -> (&Frame, &mut Joypad, &mut Samples) {
+        self.bus.io_interface()
+    }
+
+    // 运行一帧
+    pub fn run_next_frame(&mut self) {
+        while !self.run_next_instruction() {}
+    }
+
+    pub fn run_next_instruction(&mut self) -> bool {
+        self.run_next_instruction_with_trace(|_| {})
+    }
+
+    pub fn run_next_frame_with_trace<F>(&mut self, mut trace: F)
+    where
+        F: FnMut(&mut CPU)
+    {
+        while !self.run_next_instruction_with_trace(|cpu| trace(cpu)) { }
+    }
+
+    /// 执行下一条指令, 返回值表示是否到达了帧末尾
+    pub fn run_next_instruction_with_trace<F>(&mut self, mut trace: F) -> bool 
+    where
+        F: FnMut(&mut CPU)
+    {
+        // 处理中断
+        if let Some(_) = self.bus.poll_nmi_status() {
+            self.nmi();
+        } else if self.bus.irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
+            self.irq();
+        }
+        // trace
+        trace(self);
+        // 执行
+        let cycles = self.execute_instruction();
+
+        let mut frame_end = false;
+        for _ in 0..cycles {
+            frame_end |= self.bus.clock();
+        }
+        frame_end
+    } 
 
     /// 模拟 NES 插入卡带时的动作(RESET 中断)
     /// 1. 状态重置(寄存器与状态寄存器)
@@ -133,7 +180,7 @@ impl<'a> CPU<'a> {
     /// 2. 状态寄存器入栈(UB=10)
     /// 3. 状态寄存器 I 置 1
     /// 4. 将 PC 寄存器值设为地址 0xFFFA 处的 16 bit 数值
-    pub fn nmi(&mut self) {
+    fn nmi(&mut self) {
         self.stack_push_u16(self.program_counter); // 下一条指令地址
         let mut flag = self.status.clone();
         flag.insert(CpuFlags::BREAK2);
@@ -151,7 +198,7 @@ impl<'a> CPU<'a> {
     /// 2. 状态寄存器入栈(UB=10)
     /// 3. 状态寄存器 I 置 1
     /// 4. 将 PC 寄存器值设为地址 0xFFFE 处的 16 bit 数值
-    pub fn irq(&mut self) {
+    fn irq(&mut self) {
         self.stack_push_u16(self.program_counter); // 下一条指令地址
         let mut flag = self.status.clone();
         flag.insert(CpuFlags::BREAK2);
@@ -164,318 +211,300 @@ impl<'a> CPU<'a> {
         self.program_counter = self.mem_read_u16(INTERRUPT_IRQ_BRK_VECTOR);
     }
 
-    pub fn run(&mut self) {
-        self.run_with_callback(|_| {});
-    }
+    /// CPU 执行一条指令, 返回值为指令周期
+    fn execute_instruction(&mut self) -> u8 {
+        // 操作码解码
+        let code = self.mem_read(self.program_counter);
+        self.program_counter += 1;
+        let program_counter_before = self.program_counter; // 用来标记是否发生了跳转
+        let opcode = OPCODES_MAP.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
 
-    pub fn run_with_callback<F>(&mut self, mut callback: F)
-    where
-        F: FnMut(&mut CPU),
-    {
-        let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
-
-        loop {
-            if let Some(_) = self.bus.poll_nmi_status() {
-                self.nmi();
-            } else if self.bus.irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
-                self.irq();
+        match code {
+            // load/store
+            0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
+                self.lda(&opcode.mode);
             }
-            callback(self);
-            let code = self.mem_read(self.program_counter);
-            self.program_counter += 1;
-            let program_counter_state = self.program_counter;
-
-            let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
-
-            match code {
-                // load/store
-                0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => {
-                    self.lda(&opcode.mode);
-                }
-                0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
-                    self.ldx(&opcode.mode);
-                }
-                0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
-                    self.ldy(&opcode.mode);
-                }
-                0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
-                    self.sta(&&opcode.mode);
-                }
-                0x86 | 0x96 | 0x8e => {
-                    self.stx(&opcode.mode);
-                }
-                0x84 | 0x94 | 0x8c => {
-                    self.sty(&opcode.mode);
-                }
-                // push/pop
-                0x48 => {
-                    self.pha();
-                }
-                0x08 => {
-                    self.php();
-                }
-                0x68 => {
-                    self.pla();
-                }
-                0x28 => {
-                    self.plp();
-                }
-                // 递增/递减
-                0xc6 | 0xd6 | 0xce | 0xde => {
-                    self.dec(&opcode.mode);
-                }
-                0xca => {
-                    self.dex();
-                }
-                0x88 => {
-                    self.dey();
-                }
-                0xe6 | 0xf6 | 0xee | 0xfe => {
-                    self.inc(&opcode.mode);
-                }
-                0xe8 => {
-                    self.inx();
-                }
-                0xc8 => {
-                    self.iny();
-                }
-                // 移位
-                0x0a => {
-                    self.asl_a();
-                }
-                0x06 | 0x16 | 0x0e | 0x1e => {
-                    self.asl(&opcode.mode);
-                }
-                0x4a => {
-                    self.lsr_a();
-                }
-                0x46 | 0x56 | 0x4e | 0x5e => {
-                    self.lsr(&opcode.mode);
-                }
-                0x2a => {
-                    self.rol_a();
-                }
-                0x26 | 0x36 | 0x2e | 0x3e => {
-                    self.rol(&opcode.mode);
-                }
-                0x6a => {
-                    self.ror_a();
-                }
-                0x66 | 0x76 | 0x6e | 0x7e => {
-                    self.ror(&opcode.mode);
-                }
-                // 逻辑
-                0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => {
-                    self.and(&opcode.mode);
-                }
-                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
-                    self.ora(&opcode.mode);
-                }
-                0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
-                    self.eor(&opcode.mode);
-                }
-                // bit
-                0x24 | 0x2c => {
-                    self.bit(&opcode.mode);
-                }
-                // 比较
-                0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 => {
-                    self.cmp(&opcode.mode);
-                }
-                0xe0 | 0xe4 | 0xec => {
-                    self.cpx(&opcode.mode);
-                }
-                0xc0 | 0xc4 | 0xcc => {
-                    self.cpy(&opcode.mode);
-                }
-                // 算术
-                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
-                    self.adc(&opcode.mode);
-                }
-                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
-                    self.sbc(&opcode.mode);
-                }
-                // 跳转与返回
-                0x4c => {
-                    self.jmp_absolute();
-                }
-                0x6c => {
-                    self.jmp_indirect();
-                }
-                0x20 => {
-                    self.jsr();
-                }
-                0x40 => {
-                    self.rti();
-                }
-                0x60 => {
-                    self.rts();
-                }
-                // 分支
-                0x90 => { // BCC
-                    if !self.status.contains(CpuFlags::CARRY) {
-                        self.branch();
-                    }
-                }
-                0xb0 => { // BCS
-                    if self.status.contains(CpuFlags::CARRY) {
-                        self.branch();
-                    }
-                }
-                0xf0 => { // BEQ
-                    if self.status.contains(CpuFlags::ZERO) {
-                        self.branch();
-                    }
-                }
-                0x30 => { // BMI
-                    if self.status.contains(CpuFlags::NEGATIVE) {
-                        self.branch();
-                    }
-                }
-                0xd0 => { // BNE
-                    if !self.status.contains(CpuFlags::ZERO) {
-                        self.branch();
-                    }
-                }
-                0x10 => { // BPL
-                    if !self.status.contains(CpuFlags::NEGATIVE) {
-                        self.branch();
-                    }
-                }
-                0x50 => { // BVC
-                    if !self.status.contains(CpuFlags::OVERFLOW) {
-                        self.branch();
-                    }
-                }
-                0x70 => { // BVS
-                    if self.status.contains(CpuFlags::OVERFLOW) {
-                        self.branch();
-                    }
-                }
-                // 状态寄存器
-                0x18 => {
-                    self.clc();
-                }
-                0xd8 => {
-                    self.cld();
-                }
-                0x58 => {
-                    self.cli();
-                }
-                0xb8 => {
-                    self.clv();
-                }
-                0x38 => {
-                    self.sec();
-                }
-                0xf8 => {
-                    self.sed();
-                }
-                0x78 => {
-                    self.sei();
-                }
-                // 传送指令
-                0xaa => {
-                    self.tax();
-                }
-                0xa8 => {
-                    self.tay();
-                }
-                0xba => {
-                    self.tsx();
-                }
-                0x8a => {
-                    self.txa();
-                }
-                0x9a => {
-                    self.txs();
-                }
-                0x98 => {
-                    self.tya();
-                }
-                0xea => { // nop
-                    // nothing
-                }
-                0x00 => { // BRK
-                    return;  // just end
-                }
-                // unofficial
-                0x07 | 0x17 | 0x0f | 0x1f | 0x1b | 0x03 | 0x13 => {
-                    self.slo(&opcode.mode);
-                }
-                0x27 | 0x37 | 0x2f | 0x3f | 0x3b | 0x23 | 0x33 => {
-                    self.rla(&opcode.mode);
-                }
-                0x47 | 0x57 | 0x4f | 0x5f | 0x5b | 0x43 | 0x53 => {
-                    self.sre(&opcode.mode);
-                }
-                0x67 | 0x77 | 0x6f | 0x7f | 0x7b | 0x63 | 0x73 => {
-                    self.rra(&opcode.mode);
-                }
-                0x87 | 0x97 | 0x83 | 0x8f => {
-                    self.sax(&opcode.mode);
-                }
-                0xa7 | 0xb7 | 0xaf | 0xbf | 0xa3 | 0xb3 => {
-                    self.lax(&opcode.mode);
-                }
-                0xc7 | 0xd7 | 0xcf | 0xdf | 0xdb | 0xc3 | 0xd3 => {
-                    self.dcp(&opcode.mode);
-                }
-                0xe7 | 0xf7 | 0xef | 0xff | 0xfb | 0xe3 | 0xf3 => {
-                    self.isc(&opcode.mode);
-                }
-                0x0b | 0x2b => {
-                    self.anc(&opcode.mode);
-                }
-                0x4b => {
-                    self.alr(&opcode.mode);
-                }
-                0x6b => {
-                    self.arr(&opcode.mode);
-                }
-                0x8b => {
-                    self.xaa(&opcode.mode);
-                }
-                0xab => {
-                    self.lax(&opcode.mode);
-                }
-                0xcb => {
-                    self.axs(&opcode.mode);
-                }
-                0xeb => {
-                    self.sbc(&opcode.mode);
-                }
-                0x9f | 0x93 => {
-                    self.ahx(&opcode.mode);
-                }
-                0x9c => {
-                    self.shy(&opcode.mode);
-                }
-                0x9e => {
-                    self.shx(&opcode.mode);
-                }
-                0x9b => {
-                    self.tas(&opcode.mode);
-                }
-                0xbb => {
-                    self.las(&opcode.mode);
-                }
-                0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xb2 | 0xd2 | 0xf2 => { // KIL
-                    todo!("KIL todo");
-                }
-                _ => { // NOP, DOP, TOP
-                    // nothing
+            0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => {
+                self.ldx(&opcode.mode);
+            }
+            0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => {
+                self.ldy(&opcode.mode);
+            }
+            0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
+                self.sta(&&opcode.mode);
+            }
+            0x86 | 0x96 | 0x8e => {
+                self.stx(&opcode.mode);
+            }
+            0x84 | 0x94 | 0x8c => {
+                self.sty(&opcode.mode);
+            }
+            // push/pop
+            0x48 => {
+                self.pha();
+            }
+            0x08 => {
+                self.php();
+            }
+            0x68 => {
+                self.pla();
+            }
+            0x28 => {
+                self.plp();
+            }
+            // 递增/递减
+            0xc6 | 0xd6 | 0xce | 0xde => {
+                self.dec(&opcode.mode);
+            }
+            0xca => {
+                self.dex();
+            }
+            0x88 => {
+                self.dey();
+            }
+            0xe6 | 0xf6 | 0xee | 0xfe => {
+                self.inc(&opcode.mode);
+            }
+            0xe8 => {
+                self.inx();
+            }
+            0xc8 => {
+                self.iny();
+            }
+            // 移位
+            0x0a => {
+                self.asl_a();
+            }
+            0x06 | 0x16 | 0x0e | 0x1e => {
+                self.asl(&opcode.mode);
+            }
+            0x4a => {
+                self.lsr_a();
+            }
+            0x46 | 0x56 | 0x4e | 0x5e => {
+                self.lsr(&opcode.mode);
+            }
+            0x2a => {
+                self.rol_a();
+            }
+            0x26 | 0x36 | 0x2e | 0x3e => {
+                self.rol(&opcode.mode);
+            }
+            0x6a => {
+                self.ror_a();
+            }
+            0x66 | 0x76 | 0x6e | 0x7e => {
+                self.ror(&opcode.mode);
+            }
+            // 逻辑
+            0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => {
+                self.and(&opcode.mode);
+            }
+            0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => {
+                self.ora(&opcode.mode);
+            }
+            0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => {
+                self.eor(&opcode.mode);
+            }
+            // bit
+            0x24 | 0x2c => {
+                self.bit(&opcode.mode);
+            }
+            // 比较
+            0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 => {
+                self.cmp(&opcode.mode);
+            }
+            0xe0 | 0xe4 | 0xec => {
+                self.cpx(&opcode.mode);
+            }
+            0xc0 | 0xc4 | 0xcc => {
+                self.cpy(&opcode.mode);
+            }
+            // 算术
+            0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => {
+                self.adc(&opcode.mode);
+            }
+            0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => {
+                self.sbc(&opcode.mode);
+            }
+            // 跳转与返回
+            0x4c => {
+                self.jmp_absolute();
+            }
+            0x6c => {
+                self.jmp_indirect();
+            }
+            0x20 => {
+                self.jsr();
+            }
+            0x40 => {
+                self.rti();
+            }
+            0x60 => {
+                self.rts();
+            }
+            // 分支
+            0x90 => { // BCC
+                if !self.status.contains(CpuFlags::CARRY) {
+                    self.branch();
                 }
             }
-
-            if program_counter_state == self.program_counter { // 没有进行跳转则转至下一条指令
-                self.program_counter += (opcode.len - 1) as u16;
+            0xb0 => { // BCS
+                if self.status.contains(CpuFlags::CARRY) {
+                    self.branch();
+                }
             }
-
-            for _ in 0..opcode.cycles {
-                self.bus.clock();
+            0xf0 => { // BEQ
+                if self.status.contains(CpuFlags::ZERO) {
+                    self.branch();
+                }
+            }
+            0x30 => { // BMI
+                if self.status.contains(CpuFlags::NEGATIVE) {
+                    self.branch();
+                }
+            }
+            0xd0 => { // BNE
+                if !self.status.contains(CpuFlags::ZERO) {
+                    self.branch();
+                }
+            }
+            0x10 => { // BPL
+                if !self.status.contains(CpuFlags::NEGATIVE) {
+                    self.branch();
+                }
+            }
+            0x50 => { // BVC
+                if !self.status.contains(CpuFlags::OVERFLOW) {
+                    self.branch();
+                }
+            }
+            0x70 => { // BVS
+                if self.status.contains(CpuFlags::OVERFLOW) {
+                    self.branch();
+                }
+            }
+            // 状态寄存器
+            0x18 => {
+                self.clc();
+            }
+            0xd8 => {
+                self.cld();
+            }
+            0x58 => {
+                self.cli();
+            }
+            0xb8 => {
+                self.clv();
+            }
+            0x38 => {
+                self.sec();
+            }
+            0xf8 => {
+                self.sed();
+            }
+            0x78 => {
+                self.sei();
+            }
+            // 传送指令
+            0xaa => {
+                self.tax();
+            }
+            0xa8 => {
+                self.tay();
+            }
+            0xba => {
+                self.tsx();
+            }
+            0x8a => {
+                self.txa();
+            }
+            0x9a => {
+                self.txs();
+            }
+            0x98 => {
+                self.tya();
+            }
+            0xea => { // nop
+                // nothing
+            }
+            0x00 => { // BRK
+                self.brk_flag = true;  // TODO: 软中断还未实现
+            }
+            // unofficial
+            0x07 | 0x17 | 0x0f | 0x1f | 0x1b | 0x03 | 0x13 => {
+                self.slo(&opcode.mode);
+            }
+            0x27 | 0x37 | 0x2f | 0x3f | 0x3b | 0x23 | 0x33 => {
+                self.rla(&opcode.mode);
+            }
+            0x47 | 0x57 | 0x4f | 0x5f | 0x5b | 0x43 | 0x53 => {
+                self.sre(&opcode.mode);
+            }
+            0x67 | 0x77 | 0x6f | 0x7f | 0x7b | 0x63 | 0x73 => {
+                self.rra(&opcode.mode);
+            }
+            0x87 | 0x97 | 0x83 | 0x8f => {
+                self.sax(&opcode.mode);
+            }
+            0xa7 | 0xb7 | 0xaf | 0xbf | 0xa3 | 0xb3 => {
+                self.lax(&opcode.mode);
+            }
+            0xc7 | 0xd7 | 0xcf | 0xdf | 0xdb | 0xc3 | 0xd3 => {
+                self.dcp(&opcode.mode);
+            }
+            0xe7 | 0xf7 | 0xef | 0xff | 0xfb | 0xe3 | 0xf3 => {
+                self.isc(&opcode.mode);
+            }
+            0x0b | 0x2b => {
+                self.anc(&opcode.mode);
+            }
+            0x4b => {
+                self.alr(&opcode.mode);
+            }
+            0x6b => {
+                self.arr(&opcode.mode);
+            }
+            0x8b => {
+                self.xaa(&opcode.mode);
+            }
+            0xab => {
+                self.lax(&opcode.mode);
+            }
+            0xcb => {
+                self.axs(&opcode.mode);
+            }
+            0xeb => {
+                self.sbc(&opcode.mode);
+            }
+            0x9f | 0x93 => {
+                self.ahx(&opcode.mode);
+            }
+            0x9c => {
+                self.shy(&opcode.mode);
+            }
+            0x9e => {
+                self.shx(&opcode.mode);
+            }
+            0x9b => {
+                self.tas(&opcode.mode);
+            }
+            0xbb => {
+                self.las(&opcode.mode);
+            }
+            0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xb2 | 0xd2 | 0xf2 => { // KIL
+                todo!("KIL todo");
+            }
+            _ => { // NOP, DOP, TOP
+                // nothing
             }
         }
+
+        if program_counter_before == self.program_counter { // 没有进行跳转则转至下一条指令
+            self.program_counter += (opcode.len - 1) as u16;
+        }
+
+        opcode.cycles
     }
 
     fn get_operand_address(&mut self, mode: &AddressingMode) -> u16 {
@@ -1168,12 +1197,20 @@ mod tests {
     use super::*;
     use crate::cartridge::tests::*;
 
+    impl CPU {
+        fn run_until_brk(&mut self) {
+            while !self.brk_flag {
+                self.run_next_instruction();
+            }
+        }
+    }
+
     #[test]
     fn test_0xa9_lda_immidiate_load_data() {
         let bus =Bus::new(test_rom_with_2_bank_prg(vec![0xa9, 0x05, 0x00])); // LDA #$05; BRK
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 0x05);
         assert!(cpu.status.bits() & 0b0000_0010 == 0b00); // Z is 0
         assert!(cpu.status.bits() & 0b1000_0000 == 0b00); // N is 0
@@ -1184,7 +1221,7 @@ mod tests {
         let bus =Bus::new(test_rom_with_2_bank_prg(vec![0xa9, 0x00, 0x00])); // LDA #$00; BRK
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 0x00);
         assert!(cpu.status.bits() & 0b0000_0010 == 0b10); // Z is 1
     }
@@ -1194,7 +1231,7 @@ mod tests {
         let bus =Bus::new(test_rom_with_2_bank_prg(vec![0xa9, 0xff, 0x00])); // LDA #$FF; BRK
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 0xff);
         assert!(cpu.status.bits() & 0b1000_0000 == 0b1000_0000); // N is 1
     }
@@ -1205,7 +1242,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.register_a = 10;
-        cpu.run();
+        cpu.run_until_brk();
 
         assert_eq!(cpu.register_x, 10)
     }
@@ -1216,7 +1253,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.mem_write(0x10, 0x55);
-        cpu.run();
+        cpu.run_until_brk();
 
         assert_eq!(cpu.register_a, 0x55);
     }
@@ -1229,7 +1266,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
 
         assert_eq!(cpu.register_x, 0xc1)
     }
@@ -1242,7 +1279,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.register_x = 0xff;
-        cpu.run();
+        cpu.run_until_brk();
 
         assert_eq!(cpu.register_x, 1)
     }
@@ -1258,7 +1295,7 @@ mod tests {
         cpu.reset();
         cpu.mem_write_u16(0x10, 0x01ff);
         cpu.mem_write_u16(0x12, 0x01);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read_u16(0x14), 0x0200); // 0x01ff + 0x01 == 0x0200
     }
 
@@ -1272,7 +1309,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 4);
     }
 
@@ -1286,7 +1323,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, -4i8 as u8);
     }
 
@@ -1302,7 +1339,7 @@ mod tests {
         cpu.status.insert(CpuFlags::CARRY); // Borrow bit is 0, so Carry is 1
         cpu.mem_write_u16(0x10, 0x0200);
         cpu.mem_write_u16(0x12, 0x01);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read_u16(0x14), 0x01ff); // 0x0200 - 0x01 == 0x01ff
     }
 
@@ -1322,7 +1359,7 @@ mod tests {
         cpu.mem_write(0x10, 0x14);
         cpu.mem_write(0x0200, 0x50);
         cpu.mem_write(0x18, 0x10);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_x, 0x14);
         assert_eq!(cpu.register_y, 0x50);
         assert_eq!(cpu.register_a, 0x14);
@@ -1342,7 +1379,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_y, 0x03);
         assert_eq!(cpu.register_x, cpu.stack_pointer);
         assert_eq!(cpu.register_a, cpu.register_x);
@@ -1359,7 +1396,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16), 0x50);
         assert_eq!(cpu.mem_read(STACK + STACK_RESET as u16 - 1), cpu.register_a);
     }
@@ -1379,7 +1416,7 @@ mod tests {
         cpu.reset();
         cpu.mem_write(0x10, 0x6);
         cpu.mem_write(0x0200, 0x6);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read(0x10), 0x5);
         assert_eq!(cpu.mem_read(0x0200), 0x7);
         assert_eq!(cpu.register_x, 0x2);
@@ -1397,7 +1434,7 @@ mod tests {
         cpu.reset();
         cpu.register_a = 0x03;
         cpu.mem_write(0x10, 0b1000_0000);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 0x06);
         assert_eq!(cpu.mem_read(0x10), 0x0);
         assert!(cpu.status.contains(CpuFlags::CARRY));
@@ -1414,7 +1451,7 @@ mod tests {
         cpu.reset();
         cpu.register_a = 0x03;
         cpu.mem_write(0x10, 0b1000_0000);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.register_a, 0x01);
         assert_eq!(cpu.mem_read(0x10), 0b0100_0000);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
@@ -1431,7 +1468,7 @@ mod tests {
         cpu.reset();
         cpu.mem_write(0x10, 0b0000_0011);
         cpu.mem_write(0x0200, 1);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read(0x10), 1);
         assert_eq!(cpu.mem_read(0x0200), 0b0000_0011);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
@@ -1454,7 +1491,7 @@ mod tests {
         let mut cpu = CPU::new(bus);
         cpu.reset();
         cpu.mem_write(0x10, 0b1001_0110);
-        cpu.run();
+        cpu.run_until_brk();
         assert_eq!(cpu.mem_read(0x11), 0b1000_0000);
         assert_eq!(cpu.mem_read(0x12), 0b1111_0111);
         assert_eq!(cpu.mem_read(0x13), 0b1111_1110);
@@ -1470,7 +1507,7 @@ mod tests {
         cpu.reset();
         cpu.register_a = 0b1000_1000;
         cpu.mem_write(0x10, 0b1100_0001);
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
@@ -1485,7 +1522,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(!cpu.status.contains(CpuFlags::CARRY));
@@ -1500,7 +1537,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::CARRY));
@@ -1515,7 +1552,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::CARRY));
@@ -1530,7 +1567,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(!cpu.status.contains(CpuFlags::CARRY));
@@ -1545,7 +1582,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(!cpu.status.contains(CpuFlags::CARRY));
@@ -1560,7 +1597,7 @@ mod tests {
         ]));
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::CARRY));
@@ -1571,43 +1608,43 @@ mod tests {
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0x18, 0x00])); // CLC
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::CARRY));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0xd8, 0x00])); // CLD
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::DECIMAL));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0x58, 0x00])); // CLI
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::INTERRUPT_DISABLE));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0xb8, 0x00])); // CLV
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(!cpu.status.contains(CpuFlags::OVERFLOW));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0x38, 0x00])); // SEC
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(cpu.status.contains(CpuFlags::CARRY));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0xf8, 0x00])); // SED
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(cpu.status.contains(CpuFlags::DECIMAL));
 
         let bus = Bus::new(test_rom_with_2_bank_prg(vec![0x78, 0x00])); // SEI
         let mut cpu = CPU::new(bus);
         cpu.reset();
-        cpu.run();
+        cpu.run_until_brk();
         assert!(cpu.status.contains(CpuFlags::INTERRUPT_DISABLE));
     }
 }
