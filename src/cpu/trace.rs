@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use super::{opcodes, CPU, Mem, AddressingMode};
+use super::{opcodes, Cpu, Mem, AddressingMode};
 
 /// 得到 cpu 下一条要执行的指令信息, 在该指令执行前调用
-pub fn trace(cpu: &mut CPU) -> String {
+pub fn trace(cpu: &mut Cpu) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
@@ -122,7 +122,7 @@ pub fn trace(cpu: &mut CPU) -> String {
 }
 
 // 不显示 mem_val (可以避免读 PPU 寄存器导致状态改变)
-pub fn trace_readonly(cpu: &mut CPU) -> String {
+pub fn trace_readonly(cpu: &mut Cpu) -> String {
     let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
     let code = cpu.mem_read(cpu.program_counter);
     let opcode = opcodes.get(&code).expect(&format!("OpCode {:02x} is not recognized", code));
@@ -241,10 +241,10 @@ mod tests {
     use crate::bus::Bus;
     use crate::cartridge::tests::test_rom;
 
-    impl CPU {
+    impl Cpu {
         pub fn run_with_trace_until_brk<F>(&mut self, mut trace: F)
         where
-            F: FnMut(&mut CPU)
+            F: FnMut(&mut Cpu)
         {
             while !self.brk_flag {
                 self.run_next_instruction_with_trace(|cpu| trace(cpu));
@@ -261,7 +261,7 @@ mod tests {
         bus.mem_write(103, 0x88);
         bus.mem_write(104, 0x00);
 
-        let mut cpu = CPU::new(bus);
+        let mut cpu = Cpu::new(bus);
         cpu.program_counter = 0x64;
         cpu.register_a = 1;
         cpu.register_x = 2;
@@ -298,7 +298,7 @@ mod tests {
         //target cell
         bus.mem_write(0x400, 0xAA);
 
-        let mut cpu = CPU::new(bus);
+        let mut cpu = Cpu::new(bus);
         cpu.program_counter = 0x64;
         cpu.register_y = 0;
         let mut result: Vec<String> = vec![];

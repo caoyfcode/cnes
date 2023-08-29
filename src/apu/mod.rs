@@ -21,7 +21,7 @@ use self::{frame_counter::{FrameCounter, FrameCounterSignal}, pulse::Pulse, tria
 // - **Sequencer(序列生成单元)** 方波与三角波通道有, 用来生成基础波形, 由 Timer 驱动
 // - **Timer** 在所有通道中使用, 用来驱动 Sequencer 生成波形, 可以通过改变 Timer 来控制频率. 其包含一个由 CPU 周期驱动的分频器. 通过分频器, 三角波通道的 Timer 每一个 CPU 周期滴答一次, 其余所有通道每 2 个 CPU 周期滴答一次
 
-pub(crate) struct APU {
+pub(crate) struct Apu {
     // 通道
     pulse1: Pulse,
     pulse2: Pulse,
@@ -48,7 +48,7 @@ impl Samples {
     }
 }
 
-impl APU {
+impl Apu {
     pub(crate) fn new() -> Self {
         Self {
             pulse1: Pulse::new(pulse::PulseId::Pulse1),
@@ -138,7 +138,7 @@ impl APU {
 
 }
 
-impl Clock for APU {
+impl Clock for Apu {
     type Result = ();
 
     fn clock(&mut self) -> Self::Result {
@@ -171,7 +171,7 @@ impl Clock for APU {
     }
 }
 
-impl Mem for APU {
+impl Mem for Apu {
     fn mem_read(&mut self, addr: u16) -> u8 {
         if addr == 0x4015 {
             self.read_status()

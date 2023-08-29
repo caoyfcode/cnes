@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::PPU, joypad::{self, Joypad}, common::{Mem, Clock, Frame}, apu::{APU, Samples}};
+use crate::{cartridge::Rom, ppu::Ppu, joypad::{self, Joypad}, common::{Mem, Clock, Frame}, apu::{Apu, Samples}};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -43,8 +43,8 @@ pub struct Bus {
     // 组成
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
-    ppu: PPU,
-    apu: APU,
+    ppu: Ppu,
+    apu: Apu,
     joypad: Joypad,
     // 状态信息
     cycles: u32, // CPU 时钟周期
@@ -55,8 +55,8 @@ impl Bus {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
-            ppu: PPU::new(rom.chr_rom, rom.screen_mirroring),
-            apu: APU::new(),
+            ppu: Ppu::new(rom.chr_rom, rom.screen_mirroring),
+            apu: Apu::new(),
             joypad: Joypad::new(),
             cycles: 0
         }

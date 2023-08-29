@@ -41,7 +41,7 @@ use self::registers::{controller::ControllerRegister, mask::MaskRegister, status
 // | Pattern Table0|       | (CHR ROM)     |
 // |_______________| $0000 |_______________|
 
-pub struct PPU {
+pub struct Ppu {
     // registers
     controller: ControllerRegister, // 0x2000 > write
     mask: MaskRegister, // 0x2001 > write
@@ -63,9 +63,9 @@ pub struct PPU {
     frame: Frame,
 }
 
-impl PPU {
+impl Ppu {
     pub fn new(chr_rom: Vec<u8>, mirroring: Mirroring) -> Self {
-        PPU {
+        Ppu {
             controller: ControllerRegister::from_bits_truncate(0),
             mask: MaskRegister::from_bits_truncate(0),
             status: StatusRegister::from_bits_truncate(0),
@@ -451,7 +451,7 @@ impl PPU {
     }
 }
 
-impl Clock for PPU {
+impl Clock for Ppu {
     type Result = ();
     fn clock(&mut self) {
         self.tick(3);

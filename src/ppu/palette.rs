@@ -1,4 +1,4 @@
-use super::PPU;
+use super::Ppu;
 
 // Pallete PPU Memory Map
 // The palette for the background runs from VRAM $3F00 to $3F0F;
@@ -32,7 +32,7 @@ pub(super) static SYSTEM_PALETTE: [(u8,u8,u8); 64] = [
    (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
 ];
 
-pub(super) fn background_palette(ppu: &PPU, nametable_base: usize, tile_x: usize, tile_y: usize) -> [u8; 4] {
+pub(super) fn background_palette(ppu: &Ppu, nametable_base: usize, tile_x: usize, tile_y: usize) -> [u8; 4] {
     let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
     let attr_byte = ppu.vram[nametable_base + 960 + attr_table_idx];
 
@@ -53,7 +53,7 @@ pub(super) fn background_palette(ppu: &PPU, nametable_base: usize, tile_x: usize
     ]
 }
 
-pub(super) fn sprites_palette(ppu: &PPU, palette_idx: usize) -> [u8; 4] {
+pub(super) fn sprites_palette(ppu: &Ppu, palette_idx: usize) -> [u8; 4] {
     let palette_start = palette_idx * 4 + 0x11;
     [
         0,

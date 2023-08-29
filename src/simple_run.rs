@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::{Duration, Instant}};
 
 use crate::bus::Bus;
 use crate::cartridge::Rom;
-use crate::cpu::CPU;
+use crate::cpu::Cpu;
 use crate::joypad;
 use ringbuf::{HeapRb, HeapProducer, HeapConsumer};
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
@@ -66,7 +66,7 @@ pub fn run(rom_filename: &str) {
     let rom_bytes = std::fs::read(rom_filename).unwrap();
     let rom = Rom::new(&rom_bytes).unwrap();
     let bus = Bus::new(rom);
-    let mut cpu = CPU::new(bus);
+    let mut cpu = Cpu::new(bus);
     cpu.reset();
 
     let mut frame_cnt = 0;
