@@ -1,4 +1,4 @@
-use crate::{cartridge::Rom, ppu::Ppu, joypad::{self, Joypad}, common::{Mem, Clock, Frame}, apu::{Apu, Samples}};
+use crate::{cartridge::Rom, ppu::{Ppu, Frame}, joypad::{self, Joypad}, common::{Mem, Clock}, apu::{Apu, Samples}};
 
 // CPU memory map
 //  _______________ $10000  _______________
@@ -39,7 +39,7 @@ use crate::{cartridge::Rom, ppu::Ppu, joypad::{self, Joypad}, common::{Mem, Cloc
 // Data:       0x2007
 // OAM DMA:    0x4014
 
-pub struct Bus {
+pub(crate) struct Bus {
     // 组成
     cpu_vram: [u8; 2048],  // 2KB CPU VRAM
     prg_rom: Vec<u8>,
@@ -51,7 +51,7 @@ pub struct Bus {
 }
 
 impl Bus {
-    pub fn new(rom: Rom) -> Bus {
+    pub(crate) fn new(rom: Rom) -> Bus {
         Bus {
             cpu_vram: [0; 2048],
             prg_rom: rom.prg_rom,
@@ -63,7 +63,7 @@ impl Bus {
     }
 
     // 是否有 NMI 中断传来
-    pub fn poll_nmi_status(&mut self) -> Option<u8> {
+    pub(crate) fn poll_nmi_status(&mut self) -> Option<u8> {
         self.ppu.poll_nmi_interrupt()
     }
 
@@ -127,10 +127,10 @@ impl Mem for Bus {
             }
             0x4000..=0x4013 | 0x4015 => self.apu.mem_read(addr),
             0x4016 => {
-                self.joypad.read(joypad::Id::P1)
+                self.joypad.read(joypad::PlayerId::P1)
             }
             0x4017 => {
-                self.joypad.read(joypad::Id::P2)
+                self.joypad.read(joypad::PlayerId::P2)
             }
             0x8000..=0xffff => { // PRG ROM
                 self.read_prg_rom(addr)

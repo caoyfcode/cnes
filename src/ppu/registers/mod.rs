@@ -1,5 +1,5 @@
-pub mod controller;
-pub mod mask;
-pub mod status;
-pub mod scroll;
-pub mod addr;
+pub(super) mod controller;
+pub(super) mod mask;
+pub(super) mod status;
+pub(super) mod scroll;
+pub(super) mod addr;

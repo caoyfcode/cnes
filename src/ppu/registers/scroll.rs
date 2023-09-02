@@ -1,4 +1,4 @@
-pub struct ScrollRegister {
+pub(in crate::ppu) struct ScrollRegister {
     pub scroll_x: u8,
     pub scroll_y: u8,
     write_x: bool,

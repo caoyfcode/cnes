@@ -15,7 +15,7 @@ bitflags! {
     /// |+-------- Emphasize green (red on PAL/Dendy)
     /// +--------- Emphasize blue
     /// ```
-    pub struct MaskRegister: u8 {
+    pub(in crate::ppu) struct MaskRegister: u8 {
         const GREYSCALE = 0b0000_0001;
         const BACKGROUN_LEFTMOST_8PXL = 0b0000_0010;
         const SPRITE_LEFTMOST_8PXL = 0b0000_0100;

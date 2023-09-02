@@ -34,6 +34,7 @@ pub(crate) struct Apu {
     samples: Samples,
 }
 
+/// audio samples
 pub struct Samples {
     data: Vec<f32>
 }

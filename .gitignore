@@ -1,6 +1,4 @@
 /target
 
 # test toms
-/NES-NROM-128
-/NES-NROM-256
-/NES-TEST-ROMS
+/test_roms

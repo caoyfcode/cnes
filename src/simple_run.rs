@@ -1,12 +1,7 @@
 use std::{collections::HashMap, time::{Duration, Instant}};
-
-use crate::bus::Bus;
-use crate::cartridge::Rom;
-use crate::cpu::Cpu;
-use crate::joypad;
 use ringbuf::{HeapRb, HeapProducer, HeapConsumer};
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
-
+use crate::{Cpu, Rom, PlayerId, JoypadButton};
 
 pub fn run(rom_filename: &str) {
     env_logger::init();
@@ -45,28 +40,27 @@ pub fn run(rom_filename: &str) {
 
     let mut key_map = HashMap::new();
     // P1
-    key_map.insert(Keycode::W, (joypad::Id::P1, joypad::Button::UP));
-    key_map.insert(Keycode::A, (joypad::Id::P1, joypad::Button::LEFT));
-    key_map.insert(Keycode::S, (joypad::Id::P1, joypad::Button::DOWN));
-    key_map.insert(Keycode::D, (joypad::Id::P1, joypad::Button::RIGHT));
-    key_map.insert(Keycode::RShift, (joypad::Id::P1, joypad::Button::SECLECT));
-    key_map.insert(Keycode::Return, (joypad::Id::P1, joypad::Button::START));
-    key_map.insert(Keycode::J, (joypad::Id::P1, joypad::Button::B));
-    key_map.insert(Keycode::K, (joypad::Id::P1, joypad::Button::A));
+    key_map.insert(Keycode::W, (PlayerId::P1, JoypadButton::UP));
+    key_map.insert(Keycode::A, (PlayerId::P1, JoypadButton::LEFT));
+    key_map.insert(Keycode::S, (PlayerId::P1, JoypadButton::DOWN));
+    key_map.insert(Keycode::D, (PlayerId::P1, JoypadButton::RIGHT));
+    key_map.insert(Keycode::RShift, (PlayerId::P1, JoypadButton::SELECT));
+    key_map.insert(Keycode::Return, (PlayerId::P1, JoypadButton::START));
+    key_map.insert(Keycode::J, (PlayerId::P1, JoypadButton::B));
+    key_map.insert(Keycode::K, (PlayerId::P1, JoypadButton::A));
     // P2
-    key_map.insert(Keycode::Up, (joypad::Id::P2, joypad::Button::UP));
-    key_map.insert(Keycode::Left, (joypad::Id::P2, joypad::Button::LEFT));
-    key_map.insert(Keycode::Down, (joypad::Id::P2, joypad::Button::DOWN));
-    key_map.insert(Keycode::Right, (joypad::Id::P2, joypad::Button::RIGHT));
-    key_map.insert(Keycode::Kp8, (joypad::Id::P2, joypad::Button::SECLECT));
-    key_map.insert(Keycode::Kp9, (joypad::Id::P2, joypad::Button::START));
-    key_map.insert(Keycode::Kp2, (joypad::Id::P2, joypad::Button::B));
-    key_map.insert(Keycode::Kp3, (joypad::Id::P2, joypad::Button::A));
+    key_map.insert(Keycode::Up, (PlayerId::P2, JoypadButton::UP));
+    key_map.insert(Keycode::Left, (PlayerId::P2, JoypadButton::LEFT));
+    key_map.insert(Keycode::Down, (PlayerId::P2, JoypadButton::DOWN));
+    key_map.insert(Keycode::Right, (PlayerId::P2, JoypadButton::RIGHT));
+    key_map.insert(Keycode::Kp8, (PlayerId::P2, JoypadButton::SELECT));
+    key_map.insert(Keycode::Kp9, (PlayerId::P2, JoypadButton::START));
+    key_map.insert(Keycode::Kp2, (PlayerId::P2, JoypadButton::B));
+    key_map.insert(Keycode::Kp3, (PlayerId::P2, JoypadButton::A));
 
     let rom_bytes = std::fs::read(rom_filename).unwrap();
     let rom = Rom::new(&rom_bytes).unwrap();
-    let bus = Bus::new(rom);
-    let mut cpu = Cpu::new(bus);
+    let mut cpu = Cpu::new(rom);
     cpu.reset();
 
     let mut frame_cnt = 0;
@@ -77,7 +71,7 @@ pub fn run(rom_filename: &str) {
         // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
         log::info!("frame {} handle start", frame_cnt);
         let (frame, joypad, samples) = cpu.io_interface();
-        texture.update(None, &frame.data[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
+        texture.update(None, &frame.data()[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
         canvas.copy(&texture, None, None).unwrap();
         canvas.present();
         log::info!("get {} samples", samples.data().len());

@@ -22,7 +22,7 @@ bitflags! {
     ///            line); cleared after reading $2002 and at dot 1 of the
     ///            pre-render line.
     /// ```
-    pub struct StatusRegister: u8 {
+    pub(in crate::ppu) struct StatusRegister: u8 {
         const OPEN_BUS_1 = 0b0000_0001;
         const OPEN_BUS_2 = 0b0000_0010;
         const OPEN_BUS_3 = 0b0000_0100;

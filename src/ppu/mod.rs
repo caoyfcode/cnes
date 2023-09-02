@@ -1,7 +1,7 @@
 mod registers;
 mod palette;
 
-use crate::{cartridge::Mirroring, common::{Frame, Rect, Clock}};
+use crate::common::Clock;
 use self::registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister};
 
 
@@ -41,7 +41,7 @@ use self::registers::{controller::ControllerRegister, mask::MaskRegister, status
 // | Pattern Table0|       | (CHR ROM)     |
 // |_______________| $0000 |_______________|
 
-pub struct Ppu {
+pub(crate) struct Ppu {
     // registers
     controller: ControllerRegister, // 0x2000 > write
     mask: MaskRegister, // 0x2001 > write
@@ -61,6 +61,55 @@ pub struct Ppu {
     scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
     cycles: u16, // scanline 内 ppu 周期, 0..341
     frame: Frame,
+}
+
+/// PPU Mirroring type
+/// - Horizontal
+/// - Vertical
+/// - 4 Screen
+#[derive(Debug, PartialEq)]
+#[allow(non_camel_case_types)]
+pub enum Mirroring {
+    VERTICAL,
+    HORIZONTAL,
+    FOUR_SCREEN,
+}
+
+/// RGB pixels matrix
+pub struct Frame {
+    data: Vec<u8>,
+}
+
+impl Frame {
+    pub const WIDTH: usize = 256; // 32 * 8
+    pub const HEIGHT: usize = 240; // 30 * 8
+
+    fn new() -> Self {
+        Frame { data: vec![0; Frame::WIDTH * Frame::HEIGHT * 3] }
+    }
+
+    fn set_pixel(&mut self, x: usize, y: usize, rgb: (u8, u8, u8)) {
+        if x >= Frame::WIDTH || y >= Frame::HEIGHT {
+            log::warn!("Attempt to set pixel at ({}, {}) which is out of frame buffer", x, y);
+            return;
+        }
+        let base = (y * Frame::WIDTH + x) * 3;
+        self.data[base] = rgb.0;
+        self.data[base + 1] = rgb.1;
+        self.data[base + 2] = rgb.2;
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+/// 左闭右开, 上闭下开矩形
+struct Rect {
+    pub left: usize,
+    pub top: usize,
+    pub right: usize,
+    pub bottom: usize,
 }
 
 impl Ppu {
@@ -127,11 +176,6 @@ impl Ppu {
     /// 检查是否生成了 NMI 中断, 检查将自动重置(take)
     pub fn poll_nmi_interrupt(&mut self) -> Option<u8> {
         self.nmi_interrupt.take()
-    }
-
-    /// 是否生成了 NMI 中断信号
-    pub fn nmi_interrupt(&self) -> Option<u8> {
-        self.nmi_interrupt
     }
 
     /// 获得此时的屏幕状态

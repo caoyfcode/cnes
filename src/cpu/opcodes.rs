@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 
 use crate::cpu::AddressingMode;
 
-pub struct OpCode {
+pub(super) struct OpCode {
     pub code: u8,
     pub mnemonic: &'static str,
     pub len: u8,
@@ -24,7 +24,7 @@ impl OpCode {
 }
 
 lazy_static! {
-    pub static ref CPU_OPCODES: Vec<OpCode> = vec![
+    pub(super) static ref CPU_OPCODES: Vec<OpCode> = vec![
         // ADC(+:add 1 cycle if page boundary crossed), NVZC
         OpCode::new(0x69, "ADC", 2, 2, AddressingMode::Immediate),
         OpCode::new(0x65, "ADC", 2, 3, AddressingMode::ZeroPage),
@@ -345,7 +345,7 @@ lazy_static! {
         OpCode::new(0xfc, "*NOP", 3, 4, AddressingMode::Absolute_X),
     ];
 
-    pub static ref OPCODES_MAP: HashMap<u8, &'static OpCode> = {
+    pub(super) static ref OPCODES_MAP: HashMap<u8, &'static OpCode> = {
         let mut map = HashMap::new();
         for op in &*CPU_OPCODES {
             map.insert(op.code, op);

@@ -1,37 +1,6 @@
-/// RGB 表示屏幕
-pub struct Frame {
-    pub data: Vec<u8>,
-}
 
-impl Frame {
-    pub const WIDTH: usize = 256; // 32 * 8
-    pub const HEIGHT: usize = 240; // 30 * 8
-
-    pub fn new() -> Self {
-        Frame { data: vec![0; Frame::WIDTH * Frame::HEIGHT * 3] }
-    }
-
-    pub fn set_pixel(&mut self, x: usize, y: usize, rgb: (u8, u8, u8)) {
-        if x >= Frame::WIDTH || y >= Frame::HEIGHT {
-            log::warn!("Attempt to set pixel at ({}, {}) which is out of frame buffer", x, y);
-            return;
-        }
-        let base = (y * Frame::WIDTH + x) * 3;
-        self.data[base] = rgb.0;
-        self.data[base + 1] = rgb.1;
-        self.data[base + 2] = rgb.2;
-    }
-}
-
-/// 左闭右开, 上闭下开矩形
-pub struct Rect {
-    pub left: usize,
-    pub top: usize,
-    pub right: usize,
-    pub bottom: usize,
-}
-
-pub trait Mem {
+/// 内存映射
+pub(crate) trait Mem {
     fn mem_read(&mut self, addr: u16) -> u8;
     fn mem_write(&mut self, addr: u16, data: u8);
 
@@ -53,7 +22,7 @@ pub trait Mem {
 
 
 /// 经过一个 CPU 周期
-pub trait Clock {
+pub(crate) trait Clock {
     type Result; // 有可能需要返回信息
     fn clock(&mut self) -> Self::Result;
 }

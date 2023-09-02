@@ -19,7 +19,7 @@ bitflags! {
     /// +--------- Generate an NMI at the start of the
     ///            vertical blanking interval (0: off; 1: on)
     /// ```
-    pub struct ControllerRegister: u8 {
+    pub(in crate::ppu) struct ControllerRegister: u8 {
         const NAME_TABLE_1 = 0b0000_0001;
         const NAME_TABLE_2 = 0b0000_0010;
         const VRAM_ADDR_INC = 0b0000_0100;

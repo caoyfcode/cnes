@@ -1,4 +1,4 @@
-pub struct AddrRegister {
+pub(in crate::ppu) struct AddrRegister {
     hi: u8,
     lo: u8,
     write_hi: bool,

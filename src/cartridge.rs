@@ -1,18 +1,8 @@
+use crate::ppu::Mirroring;
+
 const NES_TAG: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A]; // NES^Z
 const PRG_ROM_PAGE_SIZE: usize = 16 * 1024; // INES 格式中 PRG ROM 为若干个 16KB
 const CHR_ROM_PAGE_SIZE: usize = 8 * 1024; // INES 格式中 CHR ROM 为若干个 8 KB
-
-/// PPU Mirroring type
-/// - Horizontal
-/// - Vertical
-/// - 4 Screen
-#[derive(Debug, PartialEq)]
-#[allow(non_camel_case_types)]
-pub enum Mirroring {
-    VERTICAL,
-    HORIZONTAL,
-    FOUR_SCREEN,
-}
 
 pub struct Rom {
     pub prg_rom: Vec<u8>, // Program ROM
