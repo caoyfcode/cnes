@@ -3,6 +3,10 @@ use ringbuf::{HeapRb, HeapProducer, HeapConsumer};
 use sdl2::{pixels::PixelFormatEnum, event::Event, keyboard::Keycode, audio::{AudioSpecDesired, AudioCallback}};
 use crate::{Cpu, Rom, PlayerId, JoypadButton};
 
+// 帧率应为 60 左右, 从 NES CPU主频的计算方式: 1.8MHz * 3 / (341*262) = 60.44Hz
+const FPS: f32 = 60f32;
+const FRAME_TIME: f32 = 1f32 / FPS;
+
 pub fn run(rom_filename: &str) {
     env_logger::init();
     let sdl_ctx = sdl2::init().unwrap();
@@ -64,20 +68,15 @@ pub fn run(rom_filename: &str) {
     cpu.reset();
 
     let mut frame_cnt = 0;
-    let start = Instant::now();
+    // 用于帧率控制的时刻于帧数
+    let mut base_instant = Instant::now();
+    let mut base_frame = 0;
 
     loop {
-        cpu.run_next_frame();
-        // 开启垂直同步后, 帧率会有所限制(60Hz左右), 与NES CPU主频相符(1.8MHz*3/(341*262)=60.44Hz)
-        log::info!("frame {} handle start", frame_cnt);
-        let (frame, joypad, samples) = cpu.io_interface();
-        texture.update(None, &frame.data()[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
-        canvas.copy(&texture, None, None).unwrap();
-        canvas.present();
-        log::info!("get {} samples", samples.data().len());
-        sender.append_samples(samples.data());
-        samples.clear();
-
+        log::info!("Frame {} start", frame_cnt);
+        
+        // input
+        let (_, joypad, _) = cpu.io_interface();
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
@@ -96,12 +95,30 @@ pub fn run(rom_filename: &str) {
                 _ => {}
             }
         }
-        let now = start.elapsed().as_secs_f32();
-        let last = (frame_cnt + 1) as f32 / 60f32;
-        if last > now {
-            std::thread::sleep(Duration::from_secs_f32(last - now));
+
+        // update
+        cpu.run_next_frame();
+        let (frame, _, samples) = cpu.io_interface();
+        sender.input_frequency = samples.data().len() as f32 * FPS;
+        sender.append_samples(samples.data());
+        samples.clear();
+
+        // render
+        texture.update(None, &frame.data()[256 * 3 * 8..(256 * 3 * 232)], 256 * 3).unwrap();
+        canvas.copy(&texture, None, None).unwrap();
+        canvas.present();
+
+        // sleep
+        let secs_from_base = base_instant.elapsed().as_secs_f32();
+        let next_secs_from_base = (frame_cnt + 1 - base_frame) as f32 / FPS;
+        if next_secs_from_base > secs_from_base {
+            std::thread::sleep(Duration::from_secs_f32(next_secs_from_base - secs_from_base));
+        } else if secs_from_base - next_secs_from_base > FRAME_TIME * 0.5 {
+            base_frame = frame_cnt + 1;
+            base_instant = Instant::now();
         }
-        log::info!("frame {} handle end", frame_cnt);
+        
+        log::info!("Frame {} end", frame_cnt);
         frame_cnt += 1;
     }
 }
