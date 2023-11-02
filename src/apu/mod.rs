@@ -87,8 +87,8 @@ impl Apu {
         &mut self.samples
     }
 
-    pub(crate) fn irq(&self) -> bool {
-        self.frame_counter.frame_interrupt() && self.dmc.interrupt()
+    pub(crate) fn irq_line_level(&self) -> bool {
+        !(self.frame_counter.frame_interrupt() && self.dmc.interrupt())
     }
 
     /// DMC 是否需要加载 sample

@@ -57,7 +57,6 @@ pub(crate) struct Ppu {
     internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值
     // 状态信息
     mirroring: Mirroring, // screen miroring
-    nmi_interrupt: Option<u8>, // 是否生成了 NMI 中断
     scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
     cycles: u16, // scanline 内 ppu 周期, 0..341
     frame: Frame,
@@ -129,43 +128,39 @@ impl Ppu {
             internal_read_buffer: 0,
 
             mirroring,
-            nmi_interrupt: None,
             scanline: 0,
             cycles: 0,
             frame: Frame::new(),
         }
     }
 
-    fn tick(&mut self, cycles: u8) { // 经过 cycles 个 PPU 周期
-        self.cycles += cycles as u16;
-        if self.cycles >= 341 { // 新的 scanline
-            self.cycles = self.cycles - 341;
-            self.scanline += 1;
+    /// 运行 1 个 PPU 周期
+    fn tick(&mut self) { 
+        // is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角
+        let sprite_0_y = self.oam_data[0] as u16;
+        let sprite_0_x = self.oam_data[3] as u16;
+        if sprite_0_y == self.scanline
+            && sprite_0_x <= self.cycles
+            && self.mask.contains(MaskRegister::SHOW_SPRITES) {
+            self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
+        }
 
-            // is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角
-            let sprite_0_y = self.oam_data[0] as u16;
-            let sprite_0_x = self.oam_data[3] as u16;
-            if sprite_0_y == self.scanline
-                && sprite_0_x <= self.cycles
-                && self.mask.contains(MaskRegister::SHOW_SPRITES) {
-                self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
-            }
+        if self.scanline == 241 && self.cycles == 1 { // start of vblank
+            self.status.insert(StatusRegister::VBLANK_STARTED);
+            self.update_frame();
+        }
 
-            if self.scanline == 241 { // VBLANK
-                self.status.insert(StatusRegister::VBLANK_STARTED);
-                self.status.remove(StatusRegister::SPRITE_ZERO_HIT); // the sprite zero hit flag should be erased upon entering VBLANK state.
-                if self.controller.contains(ControllerRegister::GENERATE_NMI) {
-                    self.nmi_interrupt = Some(1);
-                }
-                self.update_frame();
-            }
+        if self.scanline == 261 && self.cycles == 1 { // end of vlbank
+            self.status.remove(StatusRegister::VBLANK_STARTED);
+            self.status.remove(StatusRegister::SPRITE_OVERFLOW);
+            self.status.remove(StatusRegister::SPRITE_ZERO_HIT);
+        }
 
-            if self.scanline >= 262 { // 新的一帧
-                self.scanline = 0;
-                self.nmi_interrupt = None;
-                self.status.remove(StatusRegister::VBLANK_STARTED);
-                self.status.remove(StatusRegister::SPRITE_ZERO_HIT);
-            }
+        if self.cycles >= 341 { // cycle: 0-341
+            self.cycles = 0;
+            self.scanline = (self.scanline + 1) % 262; // scanleine: 0-161
+        } else {
+            self.cycles += 1;
         }
     }
 
@@ -173,9 +168,17 @@ impl Ppu {
         self.status.contains(StatusRegister::VBLANK_STARTED)
     }
 
-    /// 检查是否生成了 NMI 中断, 检查将自动重置(take)
-    pub fn poll_nmi_interrupt(&mut self) -> Option<u8> {
-        self.nmi_interrupt.take()
+    /// 返回 nmi 线电平
+    pub fn nmi_line_level(&self) -> bool {
+        // NMI_occurred 推测即为 PPUSTATUS:VBLANK_STARTED
+        // NMI_output 推测即为 PPUCTRL:GENERATE_NMI
+        if self.status.contains(StatusRegister::VBLANK_STARTED) 
+            && self.controller.contains(ControllerRegister::GENERATE_NMI) 
+            {
+            false
+        } else {
+            true
+        }
     }
 
     /// 获得此时的屏幕状态
@@ -381,13 +384,9 @@ impl Ppu {
     // registers
 
     pub fn write_to_controller(&mut self, data: u8) { // 0x2000
-        let before_nmi_gen = self.controller.contains(ControllerRegister::GENERATE_NMI);
         self.controller.write(data);
-        let after_nmi_gen = self.controller.contains(ControllerRegister::GENERATE_NMI);
         // If the PPU is currently in vertical blank, and the PPUSTATUS ($2002) vblank flag is still set (1), changing the NMI flag in bit 7 of $2000 from 0 to 1 will immediately generate an NMI.
-        if !before_nmi_gen && after_nmi_gen && self.status.contains(StatusRegister::VBLANK_STARTED) {
-            self.nmi_interrupt = Some(1);
-        }
+        // 这句话由于 NMI_occurred(vblank started) 为 1, NMI_output 由 0 到 1 (generate_nmi), 显然自动生成 nmi, 故不需要做额外处理
     }
 
     pub fn write_to_mask(&mut self, data: u8) { // 0x2001
@@ -498,6 +497,8 @@ impl Ppu {
 impl Clock for Ppu {
     type Result = ();
     fn clock(&mut self) {
-        self.tick(3);
+        self.tick();
+        self.tick();
+        self.tick();
     }
 }

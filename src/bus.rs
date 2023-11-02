@@ -48,6 +48,8 @@ pub(crate) struct Bus {
     joypad: Joypad,
     // 状态信息
     cycles: u32, // CPU 时钟周期
+    nmi_line_level: bool,
+    irq_line_level: bool,
 }
 
 impl Bus {
@@ -58,17 +60,18 @@ impl Bus {
             ppu: Ppu::new(rom.chr_rom, rom.screen_mirroring),
             apu: Apu::new(),
             joypad: Joypad::new(),
-            cycles: 0
+            cycles: 0,
+            nmi_line_level: true,
+            irq_line_level: true,
         }
     }
 
-    // 是否有 NMI 中断传来
-    pub(crate) fn poll_nmi_status(&mut self) -> Option<u8> {
-        self.ppu.poll_nmi_interrupt()
+    pub(crate) fn nmi_line_level(&self) -> bool {
+        self.nmi_line_level
     }
 
-    pub(crate) fn irq(&self) -> bool {
-        self.apu.irq()
+    pub(crate) fn irq_line_level(&self) -> bool {
+        self.irq_line_level
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
@@ -91,8 +94,6 @@ impl Bus {
 impl Clock for Bus {
     type Result = bool; // 返回值表示是否到达帧末
     fn clock(&mut self) -> bool {
-        self.cycles += 1;
-
         let vblank_started_before = self.ppu.vblank_started();
         self.ppu.clock();
         let vblank_started_after = self.ppu.vblank_started();
@@ -102,6 +103,10 @@ impl Clock for Bus {
             let data = self.mem_read(addr);
             self.apu.load_dma_data(data);
         }
+
+        self.nmi_line_level = self.ppu.nmi_line_level();
+        self.irq_line_level = self.apu.irq_line_level();
+        self.cycles += 1;
 
         !vblank_started_before && vblank_started_after
     }

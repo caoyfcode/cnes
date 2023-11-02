@@ -68,6 +68,7 @@ bitflags! {
 }
 
 pub struct Cpu {
+    // 组成
     register_a: u8,
     register_x: u8,
     register_y: u8,
@@ -75,8 +76,12 @@ pub struct Cpu {
     program_counter: u16,
     stack_pointer: u8,  // 指向空位置
     bus: Bus, // 总线(连接CPU RAM, PPU, Rom 等)
-
+    // 状态信息
     brk_flag: bool,
+    prev_nmi_line_level: bool, // 上个周期的 nmi 线电平
+    nmi_pending: bool, // nmi 是否正在 pending
+    irq_pending: bool, // irq 是否正在 pending
+    frame_end: bool, // 是否到达了帧末尾(直到下一条指令才会重置)
 }
 
 const STACK: u16 = 0x0100; // stack pointer + STACK 即为真正的栈指针
@@ -114,7 +119,11 @@ impl Cpu {
             program_counter: 0,
             stack_pointer: STACK_RESET,
             bus: Bus::new(rom),
-            brk_flag: false
+            brk_flag: false,
+            prev_nmi_line_level: true,
+            nmi_pending: false,
+            irq_pending: false,
+            frame_end: false,
         }
     }
 
@@ -146,22 +155,18 @@ impl Cpu {
     where
         F: FnMut(&mut Cpu)
     {
-        // 处理中断
-        if let Some(_) = self.bus.poll_nmi_status() {
-            self.nmi();
-        } else if self.bus.irq() && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
-            self.irq();
-        }
+        self.frame_end = false;
         // trace
         trace(self);
         // 执行
-        let cycles = self.execute_instruction();
-
-        let mut frame_end = false;
-        for _ in 0..cycles {
-            frame_end |= self.bus.clock();
+        self.execute_instruction();
+        // 处理中断
+        if self.nmi_pending {
+            self.nmi();
+        } else if self.irq_pending && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
+            self.irq();
         }
-        frame_end
+        self.frame_end
     } 
 
     /// 模拟 NES 插入卡带时的动作(RESET 中断)
@@ -190,9 +195,11 @@ impl Cpu {
         self.stack_push(flag.bits);
         self.status.insert(CpuFlags::INTERRUPT_DISABLE);
 
-        self.bus.clock();
-        self.bus.clock();
+        self.clock();
+        self.clock();
         self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
+
+        self.nmi_pending = false;
     }
 
     /// IRQ 中断
@@ -208,13 +215,32 @@ impl Cpu {
         self.stack_push(flag.bits);
         self.status.insert(CpuFlags::INTERRUPT_DISABLE);
 
-        self.bus.clock();
-        self.bus.clock();
+        self.clock();
+        self.clock();
         self.program_counter = self.mem_read_u16(INTERRUPT_IRQ_BRK_VECTOR);
-    }
 
-    /// CPU 执行一条指令, 返回值为指令周期
-    fn execute_instruction(&mut self) -> u8 {
+        self.irq_pending = false;
+    }
+}
+
+impl Clock for Cpu {
+    type Result = ();
+
+    fn clock(&mut self) -> Self::Result {
+        if self.bus.clock() {
+            self.frame_end = true;
+        }
+        if self.prev_nmi_line_level && !self.bus.nmi_line_level() {
+            self.nmi_pending = true;
+        }
+        self.prev_nmi_line_level = self.bus.nmi_line_level();
+        self.irq_pending = !self.bus.irq_line_level();
+    }
+}
+
+impl Cpu{
+    /// CPU 执行一条指令
+    fn execute_instruction(&mut self) {
         // 操作码解码
         let code = self.mem_read(self.program_counter);
         self.program_counter += 1;
@@ -506,7 +532,9 @@ impl Cpu {
             self.program_counter += (opcode.len - 1) as u16;
         }
 
-        opcode.cycles
+        for _ in 0..opcode.cycles {
+            self.clock();
+        }
     }
 
     fn get_operand_address(&mut self, mode: &AddressingMode) -> u16 {
