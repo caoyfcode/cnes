@@ -1,5 +1,13 @@
-pub(super) mod controller;
-pub(super) mod mask;
-pub(super) mod status;
-pub(super) mod scroll;
-pub(super) mod addr;
+mod controller;
+mod mask;
+mod status;
+mod scroll;
+mod addr;
+
+pub(super) use {
+    controller::*,
+    mask::*,
+    status::*,
+    scroll::*,
+    addr::*,
+};

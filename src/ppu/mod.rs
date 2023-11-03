@@ -1,8 +1,7 @@
 mod registers;
-mod palette;
 
 use crate::common::Clock;
-use self::registers::{controller::ControllerRegister, mask::MaskRegister, status::StatusRegister, scroll::ScrollRegister, addr::AddrRegister};
+use registers::{ControllerRegister, MaskRegister, StatusRegister, ScrollRegister, AddrRegister};
 
 
 // PPU memory map
@@ -51,7 +50,7 @@ pub(crate) struct Ppu {
     addr: AddrRegister, // 0x2006 >> write twice
     // 其余组成部分
     chr_rom: Vec<u8>, // cartridge CHR ROM, or Pattern Table
-    palette_table: [u8; 32],
+    palettes_ram: [u8; 32], // background palette and sprite palette
     vram: [u8; 2 * 1024], // 2KB VRAM
     oam_data: [u8; 256], // Object Attribute Memory, keep state of sprites
     internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值
@@ -122,7 +121,7 @@ impl Ppu {
             addr: AddrRegister::new(),
 
             chr_rom,
-            palette_table: [0; 32],
+            palettes_ram: [0; 32],
             vram: [0; 2 * 1024],
             oam_data: [0; 256],
             internal_read_buffer: 0,
@@ -186,23 +185,73 @@ impl Ppu {
         &self.frame
     }
 
-    // 将 0x2000..=0x3eff 映射到 vram 下标
-    // VERTICAL: A B A B
-    // HORIZONTAL: A A B B
-    fn vram_mirror_addr(&self, addr: u16) -> u16 {
-        let mirrored = addr & 0b0010_1111_1111_1111;
-        let vram_index = mirrored - 0x2000;
-        let name_table = vram_index / 0x400; // 0, 1, 2, 3
-        match (&self.mirroring, name_table) {
-            (Mirroring::VERTICAL, 2) | (Mirroring::VERTICAL, 3) => vram_index - 0x800,
-            (Mirroring::HORIZONTAL, 1) => vram_index - 0x400,
-            (Mirroring::HORIZONTAL, 2) => vram_index - 0x400,
-            (Mirroring::HORIZONTAL, 3) => vram_index - 0x800,
-            _ => vram_index, // TODO FOUR SCREEN
-        }
-    }
+}
 
-    // 绘制相关
+// render
+impl Ppu {
+
+    // Pallete PPU Memory Map
+    // The palette for the background runs from VRAM $3F00 to $3F0F;
+    // the palette for the sprites runs from $3F10 to $3F1F. Each color takes up one byte.
+    // 0x3f00:        Universal background color
+    // 0x3f01-0x3f03: Background palette 0
+    // 0x3f05-0x3f07: Background palette 1
+    // 0x3f09-0x3f0b: Background palette 2
+    // 0x3f0d-0x3f0f: Background palette 3
+    // 0x3f11-0x3f13: Sprite palette 0
+    // 0x3f15-0x3f17: Sprite palette 1
+    // 0x3f19-0x3f1b: Sprite palette 2
+    // 0x3f1d-0x3f1f: Sprite palette 3
+    // Addresses $3F04/$3F08/$3F0C can contain unique data
+    // Addresses $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C. This goes for writing as well as reading.
+
+    /// RGB 表示的系统调色板
+    const SYSTEM_PALETTE: [(u8,u8,u8); 64] = [
+        (0x80, 0x80, 0x80), (0x00, 0x3D, 0xA6), (0x00, 0x12, 0xB0), (0x44, 0x00, 0x96), (0xA1, 0x00, 0x5E),
+        (0xC7, 0x00, 0x28), (0xBA, 0x06, 0x00), (0x8C, 0x17, 0x00), (0x5C, 0x2F, 0x00), (0x10, 0x45, 0x00),
+        (0x05, 0x4A, 0x00), (0x00, 0x47, 0x2E), (0x00, 0x41, 0x66), (0x00, 0x00, 0x00), (0x05, 0x05, 0x05),
+        (0x05, 0x05, 0x05), (0xC7, 0xC7, 0xC7), (0x00, 0x77, 0xFF), (0x21, 0x55, 0xFF), (0x82, 0x37, 0xFA),
+        (0xEB, 0x2F, 0xB5), (0xFF, 0x29, 0x50), (0xFF, 0x22, 0x00), (0xD6, 0x32, 0x00), (0xC4, 0x62, 0x00),
+        (0x35, 0x80, 0x00), (0x05, 0x8F, 0x00), (0x00, 0x8A, 0x55), (0x00, 0x99, 0xCC), (0x21, 0x21, 0x21),
+        (0x09, 0x09, 0x09), (0x09, 0x09, 0x09), (0xFF, 0xFF, 0xFF), (0x0F, 0xD7, 0xFF), (0x69, 0xA2, 0xFF),
+        (0xD4, 0x80, 0xFF), (0xFF, 0x45, 0xF3), (0xFF, 0x61, 0x8B), (0xFF, 0x88, 0x33), (0xFF, 0x9C, 0x12),
+        (0xFA, 0xBC, 0x20), (0x9F, 0xE3, 0x0E), (0x2B, 0xF0, 0x35), (0x0C, 0xF0, 0xA4), (0x05, 0xFB, 0xFF),
+        (0x5E, 0x5E, 0x5E), (0x0D, 0x0D, 0x0D), (0x0D, 0x0D, 0x0D), (0xFF, 0xFF, 0xFF), (0xA6, 0xFC, 0xFF),
+        (0xB3, 0xEC, 0xFF), (0xDA, 0xAB, 0xEB), (0xFF, 0xA8, 0xF9), (0xFF, 0xAB, 0xB3), (0xFF, 0xD2, 0xB0),
+        (0xFF, 0xEF, 0xA6), (0xFF, 0xF7, 0x9C), (0xD7, 0xE8, 0x95), (0xA6, 0xED, 0xAF), (0xA2, 0xF2, 0xDA),
+        (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
+    ];
+    
+    fn background_palette(&self, nametable_base: usize, tile_x: usize, tile_y: usize) -> [u8; 4] {
+        let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
+        let attr_byte = self.vram[nametable_base + 960 + attr_table_idx];
+    
+        let palette_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
+            (0,0) => attr_byte & 0b11,
+            (1,0) => (attr_byte >> 2) & 0b11,
+            (0,1) => (attr_byte >> 4) & 0b11,
+            (1,1) => (attr_byte >> 6) & 0b11,
+            (_,_) => panic!("should not happen"),
+        } as usize;
+    
+        let palette_start = palette_idx * 4 + 1;
+        [
+            self.palettes_ram[0],
+            self.palettes_ram[palette_start],
+            self.palettes_ram[palette_start + 1],
+            self.palettes_ram[palette_start + 2]
+        ]
+    }
+    
+    fn sprites_palette(&self, palette_idx: usize) -> [u8; 4] {
+        let palette_start = palette_idx * 4 + 0x11;
+        [
+            0,
+            self.palettes_ram[palette_start],
+            self.palettes_ram[palette_start + 1],
+            self.palettes_ram[palette_start + 2]
+        ]
+    }
 
     /// 更新整个屏幕的像素 (在 scanline 241 之前要完成)
     fn update_frame(&mut self) {
@@ -280,7 +329,7 @@ impl Ppu {
             let tile_y = idx / 32;
             let tile_base = bank_base + tile * 16;
             let tile = &self.chr_rom[tile_base..(tile_base + 16)];
-            let background_palette = palette::background_palette(self, nametable_base, tile_x, tile_y);
+            let background_palette = self.background_palette(nametable_base, tile_x, tile_y);
 
             for y in 0..8usize {
                 let pixel_y = tile_y * 8 + y;
@@ -298,7 +347,7 @@ impl Ppu {
                     let hi = (hi >> (7 - x)) & 0x1;
                     let lo = (lo >> (7 - x)) & 0x1;
                     let color = ((hi) << 1) | lo;
-                    let rgb = palette::SYSTEM_PALETTE[background_palette[color as usize] as usize];
+                    let rgb = Self::SYSTEM_PALETTE[background_palette[color as usize] as usize];
                     self.frame.set_pixel( (shift_x + pixel_x as isize) as usize,
                         (shift_y + pixel_y as isize) as usize,
                         rgb);
@@ -350,7 +399,7 @@ impl Ppu {
 
             let tile_base = bank_base + (tile as usize) * 16;
             let tile = &self.chr_rom[tile_base..(tile_base + 16)];
-            let sprites_palette = palette::sprites_palette(self, palette_idx);
+            let sprites_palette = self.sprites_palette(palette_idx);
 
             for y in 0..8usize {
                 let lo = tile[y];
@@ -363,7 +412,7 @@ impl Ppu {
                     let rgb = if color == 0 { // 透明, 跳过绘制
                         continue;
                     } else {
-                        palette::SYSTEM_PALETTE[sprites_palette[color as usize] as usize]
+                        Self::SYSTEM_PALETTE[sprites_palette[color as usize] as usize]
                     };
                     match (flip_h, flip_v) { // 精灵的绘制精确到像素
                         (false, false) => self.frame.set_pixel(tile_x + x, tile_y + y, rgb),
@@ -380,8 +429,26 @@ impl Ppu {
     fn update_sprites_8_16(&mut self) {
         todo!("8 * 16 size sprites not implement")
     }
+    
+}
 
-    // registers
+// registers
+impl Ppu {
+    // 将 0x2000..=0x3eff 映射到 vram 下标
+    // VERTICAL: A B A B
+    // HORIZONTAL: A A B B
+    fn vram_mirror_addr(&self, addr: u16) -> u16 {
+        let mirrored = addr & 0b0010_1111_1111_1111;
+        let vram_index = mirrored - 0x2000;
+        let name_table = vram_index / 0x400; // 0, 1, 2, 3
+        match (&self.mirroring, name_table) {
+            (Mirroring::VERTICAL, 2) | (Mirroring::VERTICAL, 3) => vram_index - 0x800,
+            (Mirroring::HORIZONTAL, 1) => vram_index - 0x400,
+            (Mirroring::HORIZONTAL, 2) => vram_index - 0x400,
+            (Mirroring::HORIZONTAL, 3) => vram_index - 0x800,
+            _ => vram_index, // TODO FOUR SCREEN
+        }
+    }
 
     pub fn write_to_controller(&mut self, data: u8) { // 0x2000
         self.controller.write(data);
@@ -438,10 +505,10 @@ impl Ppu {
                 match addr {
                     //  $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
                     0x3f10 | 0x3f14 | 0x3f18 | 0x3f1c => {
-                        self.palette_table[addr as usize - 0x3f00 - 0x10] = data;
+                        self.palettes_ram[addr as usize - 0x3f00 - 0x10] = data;
                     }
                     _ => {
-                        self.palette_table[addr as usize - 0x3f00] = data;
+                        self.palettes_ram[addr as usize - 0x3f00] = data;
                     }
                 }
             }
@@ -472,10 +539,10 @@ impl Ppu {
                 match addr {
                     //  $3F10/$3F14/$3F18/$3F1C are mirrors of $3F00/$3F04/$3F08/$3F0C
                     0x3f10 | 0x3f14 | 0x3f18 | 0x3f1c => {
-                        self.palette_table[addr as usize - 0x3f00 - 0x10]
+                        self.palettes_ram[addr as usize - 0x3f00 - 0x10]
                     }
                     _ => {
-                        self.palette_table[addr as usize - 0x3f00]
+                        self.palettes_ram[addr as usize - 0x3f00]
                     }
                 }
             }

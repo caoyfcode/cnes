@@ -33,9 +33,3 @@ bitflags! {
         const VBLANK_STARTED = 0b1000_0000;
     }
 }
-
-impl StatusRegister {
-    pub fn write(&mut self, data: u8) {
-        self.bits = data;
-    }
-}
