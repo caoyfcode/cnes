@@ -1,13 +1,11 @@
 mod controller;
 mod mask;
 mod status;
-mod scroll;
-mod addr;
+mod scroll_addr;
 
 pub(super) use {
     controller::*,
     mask::*,
     status::*,
-    scroll::*,
-    addr::*,
+    scroll_addr::*
 };

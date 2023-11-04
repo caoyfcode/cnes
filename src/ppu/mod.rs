@@ -1,7 +1,7 @@
 mod registers;
 
 use crate::common::Clock;
-use registers::{ControllerRegister, MaskRegister, StatusRegister, ScrollRegister, AddrRegister};
+use registers::{ControllerRegister, MaskRegister, StatusRegister, ScrollAddrRegister};
 
 
 // PPU memory map
@@ -46,14 +46,13 @@ pub(crate) struct Ppu {
     mask: MaskRegister, // 0x2001 > write
     status: StatusRegister, // 0x2002 < read
     oam_addr: u8, // 0x2003 > write
-    scroll: ScrollRegister, // 0x2005 >> write twice
-    addr: AddrRegister, // 0x2006 >> write twice
+    scroll_addr: ScrollAddrRegister, // 0x2005 >> write twice, 0x2006 >> write twice
     // 其余组成部分
     chr_rom: Vec<u8>, // cartridge CHR ROM, or Pattern Table
     palettes_ram: [u8; 32], // background palette and sprite palette
     vram: [u8; 2 * 1024], // 2KB VRAM
     oam_data: [u8; 256], // Object Attribute Memory, keep state of sprites
-    internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值
+    internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值 attributes for the lower 8 pixels of the 16-bit shift register.
     // 状态信息
     mirroring: Mirroring, // screen miroring
     scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
@@ -117,8 +116,7 @@ impl Ppu {
             mask: MaskRegister::from_bits_truncate(0),
             status: StatusRegister::from_bits_truncate(0),
             oam_addr: 0,
-            scroll: ScrollRegister::new(),
-            addr: AddrRegister::new(),
+            scroll_addr: ScrollAddrRegister::new(),
 
             chr_rom,
             palettes_ram: [0; 32],
@@ -189,6 +187,13 @@ impl Ppu {
 
 // render
 impl Ppu {
+
+    // nametable 与 attribute table
+    // 每个 nametable 共 1024B, 其中 30*32=960B 用来表示一屏幕所有 tile
+    // 而一个 tile 大小为 8*8 像素, 在 pattern table 中用连续的 16B 表示, nametable 前 960B 每个字节表示一个 tile 的索引
+    // 每个 namtable 的后 32*32-30*32=2x32B=64B 为 attribute table
+    // attribute table 中每 4*4 个 tile 共用一个字节, 而 8*8=64B,  30/4=7.5, 故最后 8B 每个字节只用到了一半
+    // 4*4 个 tile 的每 2*2 tile 共用一个调色板, 也就是说每个字节有 4 个调色板(每2bit表示一个)
 
     // Pallete PPU Memory Map
     // The palette for the background runs from VRAM $3F00 to $3F0F;
@@ -263,14 +268,14 @@ impl Ppu {
     /// 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern,
     /// 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
     fn update_background(&mut self) {
-        let scroll_x = self.scroll.scroll_x as usize;
-        let scroll_y = if self.scroll.scroll_y >= Frame::HEIGHT as u8 {
+        let scroll_x = self.scroll_addr.scroll_x() as usize;
+        let scroll_y = if self.scroll_addr.scroll_y() >= Frame::HEIGHT as u8 {
             //  "Normal" vertical offsets range from 0 to 239, while values of 240 to 255 are treated as -16 through -1 in a way, but tile data is incorrectly fetched from the attribute table.
-            let scroll_y = self.scroll.scroll_y as i8; // 转为负数
+            let scroll_y = self.scroll_addr.scroll_y() as i8; // 转为负数
             let scroll_y = Frame::HEIGHT as isize + scroll_y as isize; // 取模
             scroll_y as usize
         } else {
-            self.scroll.scroll_y as usize
+            self.scroll_addr.scroll_y() as usize
         };
 
         let (base_nametable, other_nametable): (usize, usize) = match (&self.mirroring, self.controller.base_nametable_address()) {
@@ -450,8 +455,10 @@ impl Ppu {
         }
     }
 
-    pub fn write_to_controller(&mut self, data: u8) { // 0x2000
+    /// $2000, PPUCTRL
+    pub fn write_to_controller(&mut self, data: u8) {
         self.controller.write(data);
+        self.scroll_addr.write_nametable_select(data & 0b11);
         // If the PPU is currently in vertical blank, and the PPUSTATUS ($2002) vblank flag is still set (1), changing the NMI flag in bit 7 of $2000 from 0 to 1 will immediately generate an NMI.
         // 这句话由于 NMI_occurred(vblank started) 为 1, NMI_output 由 0 到 1 (generate_nmi), 显然自动生成 nmi, 故不需要做额外处理
     }
@@ -463,8 +470,7 @@ impl Ppu {
     pub fn read_status(&mut self) -> u8 { // 0x2002
         let data = self.status.bits();
         self.status.remove(StatusRegister::VBLANK_STARTED);
-        self.addr.reset_latch();
-        self.scroll.reset_latch();
+        self.scroll_addr.reset_toggle();
         data
     }
 
@@ -483,15 +489,15 @@ impl Ppu {
     }
 
     pub fn write_to_scroll(&mut self, data: u8) { // 0x2005
-        self.scroll.write(data);
+        self.scroll_addr.write_scroll(data);
     }
 
     pub fn write_to_addr(&mut self, data: u8) { // 0x2006
-        self.addr.write(data);
+        self.scroll_addr.write_addr(data);
     }
 
     pub fn write_to_data(&mut self, data: u8) { // 0x2007
-        let addr = self.addr.get();
+        let addr = self.scroll_addr.get_addr();
         match addr {
             0..=0x1fff => { // 0..=0b0001_1111_1111_1111
                 log::warn!("Attempt to write to chr rom space PPU address {:04x}", addr);
@@ -516,12 +522,12 @@ impl Ppu {
                 log::warn!("Attempt to write to mirrored space PPU address {:04x}", addr);
             }
         }
-        self.addr.increment(self.controller.vram_addr_increment());
+        self.scroll_addr.increment_addr(self.controller.vram_addr_increment());
     }
 
     pub fn read_data(&mut self) -> u8 {
-        let addr = self.addr.get();
-        self.addr.increment(self.controller.vram_addr_increment());
+        let addr = self.scroll_addr.get_addr();
+        self.scroll_addr.increment_addr(self.controller.vram_addr_increment());
         match addr {
             0..=0x1fff => {
                 let result = self.internal_read_buffer;
