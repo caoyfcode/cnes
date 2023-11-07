@@ -40,8 +40,8 @@ impl ScrollAddrRegister {
     /// $2000, PPUCTRL lower 2 bits
     pub fn write_nametable_select(&mut self, nn: u8) {
         let nt_mask = Self::NT_Y_MASK | Self::NT_X_MASK;
-        self.v &= !nt_mask;
-        self.v |= (nn as u16) << 10;
+        self.t &= !nt_mask;
+        self.t |= (nn as u16) << 10;
     }
 
     /// on read $2002, PPUSTATUS, reset PPUADDR/PPUSCROLL latch
@@ -83,7 +83,7 @@ impl ScrollAddrRegister {
 
     /// 得到 PPUADDR 的值, 内部使用
     pub fn get_addr(&self) -> u16 {
-        self.v
+        self.v & Self::ADDR_MIRROR
     }
 
     /// At dot 256 of each scanline.
@@ -104,7 +104,7 @@ impl ScrollAddrRegister {
                 y += 1;                                           // increment coarse Y
             }
             self.v = (self.v & !Self::COARSE_Y_MASK) | (y << 5);  // put coarse Y back into v
-        }   
+        }
     }
 
     /// At dot 257 of each scanline.
@@ -157,12 +157,19 @@ impl ScrollAddrRegister {
         0x23c0 | (self.v & 0x0c00) | ((self.v >> 4) & 0x38) | ((self.v >> 2) & 0x07)
     }
 
-    pub fn scroll_x(&self) -> u8 {
-        ((self.t & Self::COARSE_X_MASK) << 3) as u8 + self.x
+    pub fn fine_x(&self) -> u8 {
+        self.x
     }
 
-    pub fn scroll_y(&self) -> u8 {
-       (((self.t & Self::COARSE_Y_MASK) >> 5) << 3) as u8 +
-       ((self.t & Self::FINE_Y_MASK) >> 12) as u8
+    pub fn fine_y(&self) -> u8 {
+        ((self.v & Self::FINE_Y_MASK) >> 12) as u8
     }
+
+    pub fn coarse_x(&self) -> u8 {
+        (self.v & Self::COARSE_X_MASK) as u8
+    }
+
+    pub fn coarse_y(&self) -> u8 {
+        ((self.v & Self::COARSE_Y_MASK) >> 5) as u8
+    } 
 }

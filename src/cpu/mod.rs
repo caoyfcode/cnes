@@ -162,8 +162,10 @@ impl Cpu {
         self.execute_instruction();
         // 处理中断
         if self.nmi_pending {
+            self.nmi_pending = false;
             self.nmi();
         } else if self.irq_pending && !self.status.contains(CpuFlags::INTERRUPT_DISABLE) {
+            self.irq_pending = false;
             self.irq();
         }
         self.frame_end
@@ -198,8 +200,6 @@ impl Cpu {
         self.clock();
         self.clock();
         self.program_counter = self.mem_read_u16(INTERRUPT_NMI_VECTOR);
-
-        self.nmi_pending = false;
     }
 
     /// IRQ 中断
@@ -218,8 +218,6 @@ impl Cpu {
         self.clock();
         self.clock();
         self.program_counter = self.mem_read_u16(INTERRUPT_IRQ_BRK_VECTOR);
-
-        self.irq_pending = false;
     }
 }
 

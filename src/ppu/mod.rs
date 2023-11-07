@@ -52,11 +52,21 @@ pub(crate) struct Ppu {
     palettes_ram: [u8; 32], // background palette and sprite palette
     vram: [u8; 2 * 1024], // 2KB VRAM
     oam_data: [u8; 256], // Object Attribute Memory, keep state of sprites
-    internal_read_buffer: u8, // 读取 0..=0x3eff (palette 之前), 将得到暂存值 attributes for the lower 8 pixels of the 16-bit shift register.
+    read_buffer: u8, // 读取 PPUDATA 时若地址位于 0..=0x3eff (palette 之前), 将得到暂存值 attributes for the lower 8 pixels of the 16-bit shift register.
+    // Background rendering shift registers
+    tile_hi_shift_register: u16, // 水平连续两个 tile 的一行16像素的高 bit
+    tile_lo_shift_register: u16, // 水平连续两个 tile 的一行16像素的低 bit
+    attr_hi_shift_register: u16, // 对应 16 个像素的 attribute 的高 bit (nesdev 中讲解使用了 8bit 的寄存器保存 8 个像素, 为了方便实现, 用了 16 bit)
+    attr_lo_shift_register: u16, // 对应 16 个像素的 attribute 的低 bit
+    // Background rendering latch
+    fetched_tile_addr: usize, // 8 周期中第 1,2 周期读取
+    fetched_attribute: u8, // 2bit, 8 周期中第 3,4 周期读取
+    fetched_tile_lo: u8, // 8周期中第 5,6 周期读取
+    fetched_tile_hi: u8, // 8周期中第 7,8 周期读取
     // 状态信息
     mirroring: Mirroring, // screen miroring
     scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
-    cycles: u16, // scanline 内 ppu 周期, 0..341
+    cycle: u16, // scanline 内 ppu 周期, 0..341
     frame: Frame,
 }
 
@@ -101,14 +111,6 @@ impl Frame {
     }
 }
 
-/// 左闭右开, 上闭下开矩形
-struct Rect {
-    pub left: usize,
-    pub top: usize,
-    pub right: usize,
-    pub bottom: usize,
-}
-
 impl Ppu {
     pub fn new(chr_rom: Vec<u8>, mirroring: Mirroring) -> Self {
         Ppu {
@@ -122,42 +124,102 @@ impl Ppu {
             palettes_ram: [0; 32],
             vram: [0; 2 * 1024],
             oam_data: [0; 256],
-            internal_read_buffer: 0,
+            read_buffer: 0,
 
+            tile_hi_shift_register: 0,
+            tile_lo_shift_register: 0,
+            attr_hi_shift_register: 0,
+            attr_lo_shift_register: 0,
+            fetched_tile_addr: 0,
+            fetched_attribute: 0,
+            fetched_tile_lo: 0,
+            fetched_tile_hi: 0,
+            
             mirroring,
             scanline: 0,
-            cycles: 0,
+            cycle: 0,
             frame: Frame::new(),
         }
     }
 
+    /// visible scaline 的 1..=256 与 visible/pre-render scanline的 321..=336,
+    /// 每 8 周期进行一次 fetch nt, fetch at, fetch bg lo bits, fetch bg hi bits, 每个两周期.
+    /// 并且 shift register 在周期 9, 17, ...(下一个周期的第 1 阶段) 进行 reload. (实现时每个第一阶段都进行)
+    /// 并且 PPU internal registers的 v 在 8, 16,..256, 328, 336 更新水平偏移.
+
     /// 运行 1 个 PPU 周期
     fn tick(&mut self) { 
-        // is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角
-        let sprite_0_y = self.oam_data[0] as u16;
-        let sprite_0_x = self.oam_data[3] as u16;
-        if sprite_0_y == self.scanline
-            && sprite_0_x <= self.cycles
-            && self.mask.contains(MaskRegister::SHOW_SPRITES) {
-            self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
+        let start_of_vblank = matches!((self.scanline, self.cycle), (241, 1));
+        let end_of_vblank = matches!((self.scanline, self.cycle), (261, 1));
+        let visible_scanline = matches!(self.scanline, 0..=239);
+        let rendering_cycle = matches!(
+            (self.scanline, self.cycle), 
+            (0..=239, 2..=257)
+        );
+        let fetching_data = matches!(
+            (self.scanline, self.cycle),
+            (0..=239 | 261, 1..=256 | 321..=336)
+        );
+
+        if rendering_cycle && self.rendering_enabled() { // FIXME 这个条件不符合 nesdev 所述
+            let bg_color = self.background_pixel();
+            self.frame.set_pixel(self.cycle as usize - 2, self.scanline as usize, Self::SYSTEM_PALETTE[bg_color]);
+            
+            // FIXME is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角(不正确)
+            let sprite_0_y = self.oam_data[0] as u16;
+            let sprite_0_x = self.oam_data[3] as u16;
+            if sprite_0_y == self.scanline
+                && sprite_0_x == (self.cycle - 2)
+                && bg_color != 0
+                && self.mask.contains(MaskRegister::SHOW_SPRITES) {
+                self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
+            }
         }
 
-        if self.scanline == 241 && self.cycles == 1 { // start of vblank
+        if self.rendering_enabled() {
+            if fetching_data {
+                match self.cycle % 8 {
+                    1 => {
+                        self.reload_shift_registers(); // 第一个周期 shift
+                        self.fetch_nametable();
+                    },
+                    3 => self.fetch_attribute(),
+                    5 => self.fetch_tile_lo(),
+                    7 => self.fetch_tile_hi(),
+                    0 => self.scroll_addr.increment_x_in_v(),
+                    _ => (),
+                }
+            }
+
+            if visible_scanline || self.scanline == 261 {
+                match self.cycle {
+                    256 => self.scroll_addr.increment_y_in_v(),
+                    257 => self.scroll_addr.copy_x_to_v(),
+                    _ => (),
+                }
+            }
+
+            if self.scanline == 261 && self.cycle >= 280 && self.cycle <= 304 {
+                self.scroll_addr.copy_y_to_v();
+            }
+        }
+
+        if start_of_vblank { // start of vblank
             self.status.insert(StatusRegister::VBLANK_STARTED);
-            self.update_frame();
+            self.update_sprites();
         }
 
-        if self.scanline == 261 && self.cycles == 1 { // end of vlbank
+        if end_of_vblank { // end of vlbank
             self.status.remove(StatusRegister::VBLANK_STARTED);
             self.status.remove(StatusRegister::SPRITE_OVERFLOW);
             self.status.remove(StatusRegister::SPRITE_ZERO_HIT);
         }
 
-        if self.cycles >= 341 { // cycle: 0-341
-            self.cycles = 0;
+        if self.cycle >= 341 { // cycle: 0-341
+            self.cycle = 0;
             self.scanline = (self.scanline + 1) % 262; // scanleine: 0-161
         } else {
-            self.cycles += 1;
+            self.cycle += 1;
         }
     }
 
@@ -171,7 +233,7 @@ impl Ppu {
         // NMI_output 推测即为 PPUCTRL:GENERATE_NMI
         if self.status.contains(StatusRegister::VBLANK_STARTED) 
             && self.controller.contains(ControllerRegister::GENERATE_NMI) 
-            {
+        {
             false
         } else {
             true
@@ -183,18 +245,14 @@ impl Ppu {
         &self.frame
     }
 
+    fn rendering_enabled(&self) -> bool {
+        self.mask.contains(MaskRegister::SHOW_BACKGROUND) || self.mask.contains(MaskRegister::SHOW_SPRITES)
+    }
+
 }
 
 // render
 impl Ppu {
-
-    // nametable 与 attribute table
-    // 每个 nametable 共 1024B, 其中 30*32=960B 用来表示一屏幕所有 tile
-    // 而一个 tile 大小为 8*8 像素, 在 pattern table 中用连续的 16B 表示, nametable 前 960B 每个字节表示一个 tile 的索引
-    // 每个 namtable 的后 32*32-30*32=2x32B=64B 为 attribute table
-    // attribute table 中每 4*4 个 tile 共用一个字节, 而 8*8=64B,  30/4=7.5, 故最后 8B 每个字节只用到了一半
-    // 4*4 个 tile 的每 2*2 tile 共用一个调色板, 也就是说每个字节有 4 个调色板(每2bit表示一个)
-
     // Pallete PPU Memory Map
     // The palette for the background runs from VRAM $3F00 to $3F0F;
     // the palette for the sprites runs from $3F10 to $3F1F. Each color takes up one byte.
@@ -227,27 +285,6 @@ impl Ppu {
         (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
     ];
     
-    fn background_palette(&self, nametable_base: usize, tile_x: usize, tile_y: usize) -> [u8; 4] {
-        let attr_table_idx = tile_y / 4 * 8 + tile_x / 4;
-        let attr_byte = self.vram[nametable_base + 960 + attr_table_idx];
-    
-        let palette_idx = match (tile_x % 4 / 2, tile_y % 4 / 2) {
-            (0,0) => attr_byte & 0b11,
-            (1,0) => (attr_byte >> 2) & 0b11,
-            (0,1) => (attr_byte >> 4) & 0b11,
-            (1,1) => (attr_byte >> 6) & 0b11,
-            (_,_) => panic!("should not happen"),
-        } as usize;
-    
-        let palette_start = palette_idx * 4 + 1;
-        [
-            self.palettes_ram[0],
-            self.palettes_ram[palette_start],
-            self.palettes_ram[palette_start + 1],
-            self.palettes_ram[palette_start + 2]
-        ]
-    }
-    
     fn sprites_palette(&self, palette_idx: usize) -> [u8; 4] {
         let palette_start = palette_idx * 4 + 0x11;
         [
@@ -258,107 +295,87 @@ impl Ppu {
         ]
     }
 
-    /// 更新整个屏幕的像素 (在 scanline 241 之前要完成)
-    fn update_frame(&mut self) {
-        self.update_background();
-        self.update_sprites();
+    // nametable 与 attribute table
+    // 每个 nametable 共 1024B, 其中 30*32=960B 用来表示一屏幕所有 tile
+    // 而一个 tile 大小为 8*8 像素, 在 pattern table 中用连续的 16B 表示, nametable 前 960B 每个字节表示一个 tile 的索引
+    // 每个 namtable 的后 32*32-30*32=2x32B=64B 为 attribute table
+    // attribute table 中每 4*4 个 tile 共用一个字节, 而 8*8=64B,  30/4=7.5, 故最后 8B 每个字节只用到了一半
+    // 4*4 个 tile 的每 2*2 tile 共用一个调色板, 也就是说每个字节有 4 个调色板(每2bit表示一个)
+
+    /// 每个 scanline 的周期 2...257 每周期得到一个像素(共 256 像素),
+    /// x 为屏幕水平坐标, 返回值为系统调色板的索引
+    fn background_pixel(&self) -> usize {
+        let cycle_shift = (self.cycle - 2) % 8;
+        let lshift = self.scroll_addr.fine_x() as u16 + cycle_shift;
+        let rshift = 15 - lshift;
+        let pixel_hi = (self.tile_hi_shift_register >> rshift) & 0x1;
+        let pixel_lo = (self.tile_lo_shift_register >> rshift) & 0x1;
+        let attr_hi = (self.attr_hi_shift_register >> rshift) & 0x1;
+        let attr_lo = (self.attr_lo_shift_register >> rshift) & 0x1;
+        let pixel = (pixel_hi << 1) + pixel_lo;
+        let attr = (attr_hi << 1) + attr_lo;
+        let palette_start = (attr as usize) * 4;
+        let color_index = match pixel {
+            0 => self.palettes_ram[0] as usize,
+            _ => self.palettes_ram[palette_start + pixel as usize] as usize,
+        };
+        color_index % 64
     }
 
-    /// 绘制背景:
-    /// 共有 32 * 30 = 960 个 tile, 每个 tile 用 1 字节(name table中)指定 pattern,
-    /// 每 4 * 4 个 tile 使用 1 个字节(attribute table中) 指定 background palette
-    fn update_background(&mut self) {
-        let scroll_x = self.scroll_addr.scroll_x() as usize;
-        let scroll_y = if self.scroll_addr.scroll_y() >= Frame::HEIGHT as u8 {
-            //  "Normal" vertical offsets range from 0 to 239, while values of 240 to 255 are treated as -16 through -1 in a way, but tile data is incorrectly fetched from the attribute table.
-            let scroll_y = self.scroll_addr.scroll_y() as i8; // 转为负数
-            let scroll_y = Frame::HEIGHT as isize + scroll_y as isize; // 取模
-            scroll_y as usize
-        } else {
-            self.scroll_addr.scroll_y() as usize
-        };
-
-        let (base_nametable, other_nametable): (usize, usize) = match (&self.mirroring, self.controller.base_nametable_address()) {
-            (_, 0x2000) | (Mirroring::VERTICAL, 0x2800) | (Mirroring::HORIZONTAL, 0x2400) => (0, 0x0400),
-            (_, 0x2c00) | (Mirroring::VERTICAL, 0x2400) | (Mirroring::HORIZONTAL, 0x2800) => (0x0400, 0),
-            (_, _) => {
-                panic!("Not supported mirroring type {:?}", &self.mirroring);
-            }
-        };
-        let (right_nametable, down_namatable) = match &self.mirroring {
-            Mirroring::HORIZONTAL => (base_nametable, other_nametable),
-            Mirroring::VERTICAL => (other_nametable, base_nametable),
-            _ => panic!("can't be here")
-        };
-
-        // 绘制四部分到 Frame
-        self.update_nametable_to_frame(
-            base_nametable,
-            Rect { left: scroll_x, top: scroll_y, right: Frame::WIDTH, bottom: Frame::HEIGHT },
-            0, 0
-        );
-        if scroll_x > 0 {
-            self.update_nametable_to_frame(
-                right_nametable,
-                Rect { left: 0, top: scroll_y, right: scroll_x, bottom: Frame::HEIGHT },
-                Frame::WIDTH - scroll_x, 0
-            );
+    /// 将一个 tile 的一行与它的 2bit attribute 移入移位寄存器
+    fn reload_shift_registers(&mut self) {
+        self.tile_hi_shift_register <<= 8;
+        self.tile_lo_shift_register <<= 8;
+        self.attr_hi_shift_register <<= 8;
+        self.attr_lo_shift_register <<= 8;
+        self.tile_hi_shift_register |= self.fetched_tile_hi as u16;
+        self.tile_lo_shift_register |= self.fetched_tile_lo as u16;
+        if self.fetched_attribute & 0b10 == 0b10 {
+            self.attr_hi_shift_register |= 0x00ff;
         }
-        if scroll_y > 0 {
-            self.update_nametable_to_frame(
-                down_namatable,
-                Rect { left: scroll_x, top: 0, right: Frame::WIDTH, bottom: scroll_y },
-                0, Frame::HEIGHT - scroll_y
-            );
+        if self.fetched_attribute & 0b01 == 0b01 {
+            self.attr_lo_shift_register |= 0x00ff;
         }
-        if scroll_x >0 && scroll_y > 0 {
-            self.update_nametable_to_frame(
-                other_nametable,
-                Rect { left: 0, top: 0, right: scroll_x, bottom: scroll_y },
-                Frame::WIDTH - scroll_x, Frame::HEIGHT - scroll_y
-            );
-        }
-
     }
 
-    // 将 nametable 的 src 部分(以pixel为单位) 绘制到 frame 的 (dest_left, dest_top) 位置, 并且左闭右开，上闭下开
-    fn update_nametable_to_frame(&mut self, nametable_base: usize, src: Rect, dest_left: usize, dest_top: usize) {
-        let shift_x = dest_left as isize - src.left as isize;
-        let shift_y = dest_top as isize - src.top as isize;
-        let bank = self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize;
-        let bank_base = bank * 0x1000;
+    fn fetch_nametable(&mut self) {
+        let addr = self.scroll_addr.tile_addr();
+        let index = self.vram_mirror_addr(addr) as usize;
+        let namtable_byte = self.vram[index];
+        // DCBA98 76543210
+        // ---------------
+        // 0HNNNN NNNNPyyy
+        // |||||| |||||+++- T: Fine Y offset, the row number within a tile
+        // |||||| ||||+---- P: Bit plane (0: less significant bit; 1: more significant bit)
+        // ||++++-++++----- N: Tile number from name table
+        // |+-------------- H: Half of pattern table (0: "left"; 1: "right")
+        // +--------------- 0: Pattern table is at $0000-$1FFF
+        self.fetched_tile_addr = 
+            ((self.controller.contains(ControllerRegister::BACKGROUND_PATTERN_ADDR) as usize) << 12) | // H
+            ((namtable_byte as usize) << 4) | // NNNN NNNN
+            self.scroll_addr.fine_y() as usize; // yyy
+        log::trace!("tile address in vram: {:04x}", self.fetched_tile_addr);
+    }
 
-        for idx in 0..0x03c0usize { // nametable
-            let tile = self.vram[nametable_base + idx] as usize;
-            let tile_x = idx % 32;
-            let tile_y = idx / 32;
-            let tile_base = bank_base + tile * 16;
-            let tile = &self.chr_rom[tile_base..(tile_base + 16)];
-            let background_palette = self.background_palette(nametable_base, tile_x, tile_y);
+    fn fetch_attribute(&mut self) {
+        let addr = self.scroll_addr.attr_addr();
+        let index = self.vram_mirror_addr(addr) as usize;
+        let attr_byte = self.vram[index];
+        // 每 4*4 个 tile 共用一个字节, 其中一字节分为四部分:
+        // bit01: 左上角 2*2 个tile, bit23: 右上角 2*2 个 tile
+        // bit45: 左下角, bit67: 右下角
+        let shift_x = self.scroll_addr.coarse_x() & 0b10;
+        let shift_y = self.scroll_addr.coarse_y() & 0b10;
+        let shift = shift_x  + (shift_y << 1);
+        self.fetched_attribute = (attr_byte >> shift) & 0b11;
+    }
 
-            for y in 0..8usize {
-                let pixel_y = tile_y * 8 + y;
-                if pixel_y < src.top || pixel_y >= src.bottom {
-                    continue;
-                }
-                let lo = tile[y];
-                let hi = tile[y + 8];
+    fn fetch_tile_lo(&mut self) {
+        self.fetched_tile_lo = self.chr_rom[self.fetched_tile_addr];
+    }
 
-                for x in 0..8usize {
-                    let pixel_x = tile_x * 8 + x;
-                    if pixel_x < src.left || pixel_x >= src.right {
-                        continue;
-                    }
-                    let hi = (hi >> (7 - x)) & 0x1;
-                    let lo = (lo >> (7 - x)) & 0x1;
-                    let color = ((hi) << 1) | lo;
-                    let rgb = Self::SYSTEM_PALETTE[background_palette[color as usize] as usize];
-                    self.frame.set_pixel( (shift_x + pixel_x as isize) as usize,
-                        (shift_y + pixel_y as isize) as usize,
-                        rgb);
-                }
-            }
-        }
+    fn fetch_tile_hi(&mut self) {
+        self.fetched_tile_hi = self.chr_rom[self.fetched_tile_addr + 8];
     }
 
     /// 绘制 sprites
@@ -496,8 +513,18 @@ impl Ppu {
         self.scroll_addr.write_addr(data);
     }
 
+    fn increment_vram_addr(&mut self) {
+        if self.rendering_enabled() && (self.scanline == 261 || self.scanline <= 239) {
+            self.scroll_addr.increment_x_in_v();
+            self.scroll_addr.increment_y_in_v();
+        } else {
+            self.scroll_addr.increment_addr(self.controller.vram_addr_increment());
+        }
+    }
+
     pub fn write_to_data(&mut self, data: u8) { // 0x2007
         let addr = self.scroll_addr.get_addr();
+        self.increment_vram_addr();
         match addr {
             0..=0x1fff => { // 0..=0b0001_1111_1111_1111
                 log::warn!("Attempt to write to chr rom space PPU address {:04x}", addr);
@@ -522,22 +549,21 @@ impl Ppu {
                 log::warn!("Attempt to write to mirrored space PPU address {:04x}", addr);
             }
         }
-        self.scroll_addr.increment_addr(self.controller.vram_addr_increment());
     }
 
     pub fn read_data(&mut self) -> u8 {
         let addr = self.scroll_addr.get_addr();
-        self.scroll_addr.increment_addr(self.controller.vram_addr_increment());
+        self.increment_vram_addr();
         match addr {
             0..=0x1fff => {
-                let result = self.internal_read_buffer;
-                self.internal_read_buffer = self.chr_rom[addr as usize];
+                let result = self.read_buffer;
+                self.read_buffer = self.chr_rom[addr as usize];
                 result
             }
             0x2000..=0x3eff => {
-                let result = self.internal_read_buffer;
+                let result = self.read_buffer;
                 let addr = self.vram_mirror_addr(addr);
-                self.internal_read_buffer = self.vram[addr as usize];
+                self.read_buffer = self.vram[addr as usize];
                 result
             }
             0x3f00..=0x3fff => {
