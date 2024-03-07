@@ -40,36 +40,6 @@ use registers::{ControllerRegister, MaskRegister, StatusRegister, ScrollAddrRegi
 // | Pattern Table0|       | (CHR ROM)     |
 // |_______________| $0000 |_______________|
 
-pub(crate) struct Ppu {
-    // registers
-    controller: ControllerRegister, // 0x2000 > write
-    mask: MaskRegister, // 0x2001 > write
-    status: StatusRegister, // 0x2002 < read
-    oam_addr: u8, // 0x2003 > write
-    scroll_addr: ScrollAddrRegister, // 0x2005 >> write twice, 0x2006 >> write twice
-    // 其余组成部分
-    chr_rom: Vec<u8>, // cartridge CHR ROM, or Pattern Table
-    palettes_ram: [u8; 32], // background palette and sprite palette
-    vram: [u8; 2 * 1024], // 2KB VRAM
-    oam_data: [u8; 256], // Object Attribute Memory, keep state of sprites
-    read_buffer: u8, // 读取 PPUDATA 时若地址位于 0..=0x3eff (palette 之前), 将得到暂存值 attributes for the lower 8 pixels of the 16-bit shift register.
-    // Background rendering shift registers
-    tile_hi_shift_register: u16, // 水平连续两个 tile 的一行16像素的高 bit
-    tile_lo_shift_register: u16, // 水平连续两个 tile 的一行16像素的低 bit
-    attr_hi_shift_register: u16, // 对应 16 个像素的 attribute 的高 bit (nesdev 中讲解使用了 8bit 的寄存器保存 8 个像素, 为了方便实现, 用了 16 bit)
-    attr_lo_shift_register: u16, // 对应 16 个像素的 attribute 的低 bit
-    // Background rendering latch
-    fetched_tile_addr: usize, // 8 周期中第 1,2 周期读取
-    fetched_attribute: u8, // 2bit, 8 周期中第 3,4 周期读取
-    fetched_tile_lo: u8, // 8周期中第 5,6 周期读取
-    fetched_tile_hi: u8, // 8周期中第 7,8 周期读取
-    // 状态信息
-    mirroring: Mirroring, // screen miroring
-    scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
-    cycle: u16, // scanline 内 ppu 周期, 0..341
-    frame: Frame,
-}
-
 /// PPU Mirroring type
 /// - Horizontal
 /// - Vertical
@@ -111,6 +81,126 @@ impl Frame {
     }
 }
 
+/// OAM DATA 共 256 字节, 每个 sprite 用到 4 个字节(共 64 个):
+/// - 0: Y position of top of sprite
+/// - 1: index number
+///   * for 8 * 8 sprites, this is the tile number of this sprite within the pattern table selected in bit 3 of PPUCTRL
+///   * For 8 * 16 sprites, the PPU ignores the pattern table selection and selects a pattern table from bit 0 of this number.
+/// - 2: Attributes
+///   ```txt
+///   76543210
+///   ||||||||
+///   ||||||++- Palette (4 to 7) of sprite
+///   |||+++--- Unimplemented (read 0)
+///   ||+------ Priority (0: in front of background; 1: behind background)
+///   |+------- Flip sprite horizontally
+///   +-------- Flip sprite vertically
+///   ```
+/// - 3: X position of left side of sprite.
+#[derive(Clone, Copy)]
+struct Sprite {
+    y: u8,
+    tile_index: u8,
+    attributes: u8,
+    x: u8,
+    tile: [u8; 16],
+    other_tile: [u8; 16], // for 8x16 sprite
+}
+
+impl Sprite {
+    const fn new() -> Self {
+        Self {
+            y: 0xff,
+            tile_index: 0xff,
+            attributes: 0xff,
+            x: 0xff,
+            tile: [0xff; 16],
+            other_tile: [0xff; 16],
+        }
+    }
+
+    fn get_pixel(&self, x: u8, y: u8, h_is_16: bool) -> Option<u8> {
+        let h = if h_is_16 { 16u16 } else { 8u16 };
+        let w = 8u16;
+        if x < self.x || x as u16 >= self.x as u16 + w || y < self.y || y as u16 >= self.y as u16 + h {
+            return None;
+        }
+        let mut xx = x - self.x; 
+        let mut yy = (y - self.y) as usize;
+        if self.flip_h() {
+            xx = w as u8 - 1 - xx;
+        }
+        if self.flip_v() {
+            yy = h as usize - 1 - yy;
+        }
+        if yy < 8 {
+            let lo = (self.tile[yy] >> (7 - xx)) & 1;
+            let hi = (self.tile[yy + 8] >> (7 - xx)) & 1;
+            Some((hi << 1) | lo)
+        } else {
+            yy -= 8;
+            let lo = (self.other_tile[yy] >> (7 - xx)) & 1;
+            let hi = (self.other_tile[yy + 8] >> (7 - xx)) & 1;
+            Some((hi << 1) | lo)
+        }
+    }
+
+    fn flip_v(&self) -> bool {
+        self.attributes & 0b1000_0000 == 0b1000_0000
+    }
+
+    fn flip_h(&self) -> bool {
+        self.attributes & 0b0100_0000 == 0b0100_0000
+    }
+
+    fn priority_bit(&self) -> u8 {
+        (self.attributes >> 5) & 0x1 
+    }
+
+    fn palette_idx(&self) -> u8 {
+        self.attributes & 0b11
+    }
+}
+
+pub(crate) struct Ppu {
+    // registers
+    controller: ControllerRegister, // 0x2000 > write
+    mask: MaskRegister, // 0x2001 > write
+    status: StatusRegister, // 0x2002 < read
+    oam_addr: u8, // 0x2003 > write
+    scroll_addr: ScrollAddrRegister, // 0x2005 >> write twice, 0x2006 >> write twice
+    // 其余组成部分
+    chr_rom: Vec<u8>, // cartridge CHR ROM, or Pattern Table
+    palettes_ram: [u8; 32], // background palette and sprite palette
+    vram: [u8; 2 * 1024], // 2KB VRAM
+    oam_data: [u8; 256], // Object Attribute Memory, keep state of sprites
+    read_buffer: u8, // 读取 PPUDATA 时若地址位于 0..=0x3eff (palette 之前), 将得到暂存值 attributes for the lower 8 pixels of the 16-bit shift register.
+    // Background rendering shift registers
+    tile_hi_shift_register: u16, // 水平连续两个 tile 的一行16像素的高 bit
+    tile_lo_shift_register: u16, // 水平连续两个 tile 的一行16像素的低 bit
+    attr_hi_shift_register: u16, // 对应 16 个像素的 attribute 的高 bit (nesdev 中讲解使用了 8bit 的寄存器保存 8 个像素, 为了方便实现, 用了 16 bit)
+    attr_lo_shift_register: u16, // 对应 16 个像素的 attribute 的低 bit
+    // Background rendering latch
+    fetched_tile_addr: usize, // 8 周期中第 1,2 周期读取
+    fetched_attribute: u8, // 2bit, 8 周期中第 3,4 周期读取
+    fetched_tile_lo: u8, // 8周期中第 5,6 周期读取
+    fetched_tile_hi: u8, // 8周期中第 7,8 周期读取
+    // Sprite rendering states
+    current_sprites: [Sprite; 8], // 本行要渲染的 8 个 sprite, 但其实坐标 y 为上一行, 却延后一行渲染
+    second_oam: [u8; 32], // 本行寻找下一行渲染的 sprite, 放置在 second OAM 中, 下一行要渲染, 但坐标 y 是本行
+    second_oam_n: usize, // 当前 second OAM 中有了几个 sprite
+    sprite_eval_n: usize, // 从 OAM 中读到了第几个 sprite
+    sprite_eval_m: usize, // m = 0, 1, 2, 3, 表示一个 sprite 的 4 个字节
+    sprite_eval_tmp_data: u8,
+    sprite_eval_done: bool, // 表示是否 64 个 OAM 都被访问完了
+    // 状态信息
+    mirroring: Mirroring, // screen miroring
+    scanline: u16, // 扫描行数 0..262, 在 241 时生成 NMI 中断
+    cycle: u16, // scanline 内 ppu 周期, 0..341
+    frame: Frame,
+}
+
+
 impl Ppu {
     pub fn new(chr_rom: Vec<u8>, mirroring: Mirroring) -> Self {
         Ppu {
@@ -134,6 +224,14 @@ impl Ppu {
             fetched_attribute: 0,
             fetched_tile_lo: 0,
             fetched_tile_hi: 0,
+
+            current_sprites: [Sprite::new(); 8],
+            second_oam: [0xff; 32],
+            second_oam_n: 0,
+            sprite_eval_n: 0,
+            sprite_eval_m: 0,
+            sprite_eval_tmp_data: 0,
+            sprite_eval_done: false,
             
             mirroring,
             scanline: 0,
@@ -142,12 +240,23 @@ impl Ppu {
         }
     }
 
+    /// 运行 1 个 PPU 周期
+    /// 
+    /// ## Background
     /// visible scaline 的 1..=256 与 visible/pre-render scanline的 321..=336,
     /// 每 8 周期进行一次 fetch nt, fetch at, fetch bg lo bits, fetch bg hi bits, 每个两周期.
     /// 并且 shift register 在周期 9, 17, ...(下一个周期的第 1 阶段) 进行 reload. (实现时每个第一阶段都进行)
     /// 并且 PPU internal registers的 v 在 8, 16,..256, 328, 336 更新水平偏移.
-
-    /// 运行 1 个 PPU 周期
+    /// 由于 321..=336 这 16 个周期预先获取了 2 个 tile 的背景, 因而每行开始时直接可以渲染,
+    /// 从周期 2 开始的话正好周期 9 可以渲染完 1 个 tile, 然后便进行了 reload.
+    /// 至于 sprite, 由于上一行的数据已经加载好了, 故可以随着背景的渲染同时渲染.
+    /// ## Sprite
+    /// 每行 Sprite 处理分为三阶段,
+    /// - 1..=64, 用来清空 second OAM
+    /// - 65..=256, sprite evaluation, 计算本行有哪些 sprite 可以渲染, 放入 second OAM, 并在下一行进行渲染
+    /// - 257..=320, sprite fetch, 根据 second OAM 进行访存, 获取 tile data, 为下一行进行渲染准备
+    /// ## 渲染
+    /// 在 visible scanline 的 2..=257 周期进行渲染, 每周期一个像素, 共 256 个
     fn tick(&mut self) { 
         let start_of_vblank = matches!((self.scanline, self.cycle), (241, 1));
         let end_of_vblank = matches!((self.scanline, self.cycle), (261, 1));
@@ -156,28 +265,64 @@ impl Ppu {
             (self.scanline, self.cycle), 
             (0..=239, 2..=257)
         );
-        let fetching_data = matches!(
+        let rendering_bg_cycle = rendering_cycle &&
+            self.mask.contains(MaskRegister::SHOW_BACKGROUND) &&
+            (self.mask.contains(MaskRegister::BACKGROUN_LEFTMOST_8PXL) || (self.cycle - 2 > 7));
+        let background_fetch_cycle = matches!(
             (self.scanline, self.cycle),
             (0..=239 | 261, 1..=256 | 321..=336)
         );
-
-        if rendering_cycle && self.rendering_enabled() { // FIXME 这个条件不符合 nesdev 所述
-            let bg_color = self.background_pixel();
-            self.frame.set_pixel(self.cycle as usize - 2, self.scanline as usize, Self::SYSTEM_PALETTE[bg_color]);
-            
-            // FIXME is sprite 0 hit, 即是否已经绘制完 sprite 0 的左上角(不正确)
-            let sprite_0_y = self.oam_data[0] as u16;
-            let sprite_0_x = self.oam_data[3] as u16;
-            if sprite_0_y == self.scanline
-                && sprite_0_x == (self.cycle - 2)
-                && bg_color != 0
-                && self.mask.contains(MaskRegister::SHOW_SPRITES) {
-                self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
-            }
-        }
+        let second_oam_init_cycle = matches!(self.cycle, 1..=64);
+        let sprite_eval_cycle = matches!(self.cycle, 65..=256);
+        let sprite_fetch_cycle = matches!(self.cycle, 257..=320);
+        let rendering_spr_cycle = rendering_cycle &&
+            self.mask.contains(MaskRegister::SHOW_SPRITES) &&
+            (self.mask.contains(MaskRegister::SPRITE_LEFTMOST_8PXL) || (self.cycle - 2 > 7));
 
         if self.rendering_enabled() {
-            if fetching_data {
+            if rendering_cycle {
+                let (bg_color, bg_zero) = self.background_pixel();
+                let spr_pix_ret = self.sprite_pixel();
+                let pixel_color = match (bg_zero, spr_pix_ret) {
+                    (true, None) => {
+                        Self::SYSTEM_PALETTE[self.palettes_ram[0] as usize]
+                    }
+                    (true, Some((spr_color, _,))) | 
+                    (false, Some((spr_color, 0))) => { // 背景为 0 或精灵 priority 为 0, 显示精灵
+                        if rendering_spr_cycle {
+                            Self::SYSTEM_PALETTE[spr_color]
+                        } else {
+                            Self::SYSTEM_PALETTE[self.palettes_ram[0] as usize]
+                        }
+                    }
+                    _ => { // 否则显示背景
+                        if rendering_bg_cycle {
+                            Self::SYSTEM_PALETTE[bg_color]
+                        } else {
+                            Self::SYSTEM_PALETTE[self.palettes_ram[0] as usize]
+                        }
+                    }
+                };
+                self.frame.set_pixel(self.cycle as usize - 2, self.scanline as usize, pixel_color);
+
+                // sprite 0 hit detection
+                if self.mask.contains(MaskRegister::SHOW_SPRITES) && self.mask.contains(MaskRegister::SHOW_BACKGROUND) &&
+                    ((self.mask.contains(MaskRegister::SPRITE_LEFTMOST_8PXL) && self.mask.contains(MaskRegister::BACKGROUN_LEFTMOST_8PXL)) || 
+                    (self.cycle - 2 > 7)) &&
+                    self.cycle - 2 != 255 &&
+                    !self.status.contains(StatusRegister::SPRITE_ZERO_HIT)
+                {
+                    let sprite_0 = self.fetch_sprite_0();
+                    let spr_0_pix = sprite_0.get_pixel((self.cycle - 2) as u8, self.scanline as u8 - 1, self.controller.contains(ControllerRegister::SPRITE_SIZE));
+                    if let Some(pix) = spr_0_pix {
+                        if pix != 0 && !bg_zero {
+                            self.status.insert(StatusRegister::SPRITE_ZERO_HIT);
+                        }
+                    }
+                }
+            }
+
+            if background_fetch_cycle {
                 match self.cycle % 8 {
                     1 => {
                         self.reload_shift_registers(); // 第一个周期 shift
@@ -204,9 +349,23 @@ impl Ppu {
             }
         }
 
+        if visible_scanline {
+            if second_oam_init_cycle {
+                // Secondary OAM (32-byte buffer for current sprites on scanline) is initialized to $FF - attempting to read $2004 will return $FF.
+                self.second_oam[(self.cycle as usize - 1) / 2] = 0xff;
+                self.second_oam_n = 0;
+                self.sprite_eval_n = 0;
+                self.sprite_eval_m = 0;
+                self.sprite_eval_done = false;
+            } else if sprite_eval_cycle {
+                self.sprite_evaluation();
+            } else if sprite_fetch_cycle {
+                self.sprite_fetch();
+            }
+        }
+
         if start_of_vblank { // start of vblank
             self.status.insert(StatusRegister::VBLANK_STARTED);
-            self.update_sprites();
         }
 
         if end_of_vblank { // end of vlbank
@@ -284,16 +443,6 @@ impl Ppu {
         (0xFF, 0xEF, 0xA6), (0xFF, 0xF7, 0x9C), (0xD7, 0xE8, 0x95), (0xA6, 0xED, 0xAF), (0xA2, 0xF2, 0xDA),
         (0x99, 0xFF, 0xFC), (0xDD, 0xDD, 0xDD), (0x11, 0x11, 0x11), (0x11, 0x11, 0x11)
     ];
-    
-    fn sprites_palette(&self, palette_idx: usize) -> [u8; 4] {
-        let palette_start = palette_idx * 4 + 0x11;
-        [
-            0,
-            self.palettes_ram[palette_start],
-            self.palettes_ram[palette_start + 1],
-            self.palettes_ram[palette_start + 2]
-        ]
-    }
 
     // nametable 与 attribute table
     // 每个 nametable 共 1024B, 其中 30*32=960B 用来表示一屏幕所有 tile
@@ -303,8 +452,8 @@ impl Ppu {
     // 4*4 个 tile 的每 2*2 tile 共用一个调色板, 也就是说每个字节有 4 个调色板(每2bit表示一个)
 
     /// 每个 scanline 的周期 2...257 每周期得到一个像素(共 256 像素),
-    /// x 为屏幕水平坐标, 返回值为系统调色板的索引
-    fn background_pixel(&self) -> usize {
+    /// 返回值为系统(调色板的索引, is_zero)
+    fn background_pixel(&self) -> (usize, bool) {
         let cycle_shift = (self.cycle - 2) % 8;
         let lshift = self.scroll_addr.fine_x() as u16 + cycle_shift;
         let rshift = 15 - lshift;
@@ -319,7 +468,29 @@ impl Ppu {
             0 => self.palettes_ram[0] as usize,
             _ => self.palettes_ram[palette_start + pixel as usize] as usize,
         };
-        color_index % 64
+        (color_index % 64, pixel == 0)
+    }
+
+    /// 每个 scanline 的周期 2...257 每周期得到一个像素(共 256 像素),
+    /// 从本行保存的 sprites 中获取当前的像素, 返回值为(系统调色板的索引, priority)
+    fn sprite_pixel(&self) -> Option<(usize, u8)> {
+        let y = (self.scanline - 1) as u8; // sprite 的渲染延迟了一行, 故 y = self.scanline - 1
+        let x = (self.cycle - 2) as u8;
+
+        for spr in &self.current_sprites {
+            let pix = spr.get_pixel(x, y, self.controller.contains(ControllerRegister::SPRITE_SIZE));
+            if let Some(pixel) = pix {
+                let priority = spr.priority_bit();
+                let palette_idx = spr.palette_idx();
+                let palette_start = (palette_idx as usize) * 4 + 0x10;
+                let color_index = match pixel {
+                    0 => continue, // 透明像素不渲染
+                    _ => self.palettes_ram[palette_start + pixel as usize] as usize,
+                };
+                return Some((color_index % 64, priority));
+            }
+        }
+        None
     }
 
     /// 将一个 tile 的一行与它的 2bit attribute 移入移位寄存器
@@ -378,78 +549,146 @@ impl Ppu {
         self.fetched_tile_hi = self.chr_rom[self.fetched_tile_addr + 8];
     }
 
-    /// 绘制 sprites
-    /// OAM DATA 共 256 字节, 每个 sprite 用到 4 个字节(共 64 个):
-    /// - 0: Y position of top of sprite
-    /// - 1: index number
-    ///   * for 8 * 8 sprites, this is the tile number of this sprite within the pattern table selected in bit 3 of PPUCTRL
-    ///   * For 8 * 16 sprites, the PPU ignores the pattern table selection and selects a pattern table from bit 0 of this number.
-    /// - 2: Attributes
-    ///   ```txt
-    ///   76543210
-    ///   ||||||||
-    ///   ||||||++- Palette (4 to 7) of sprite
-    ///   |||+++--- Unimplemented (read 0)
-    ///   ||+------ Priority (0: in front of background; 1: behind background)
-    ///   |+------- Flip sprite horizontally
-    ///   +-------- Flip sprite vertically
-    ///   ```
-    /// - 3: X position of left side of sprite.
-    fn update_sprites(&mut self) {
-        if self.controller.contains(ControllerRegister::SPRITE_SIZE) {
-            self.update_sprites_8_16();
-        } else {
-            self.update_sprites_8_8();
-        }
-    }
-
-    fn update_sprites_8_8(&mut self) {
-        let bank = self.controller.contains(ControllerRegister::SPRITE_PATTERN_ADDR) as usize;
-        let bank_base = bank * 0x1000;
-
-        for idx in 0..64usize {
-            let sprite_start = idx * 4;
-            let tile_y = self.oam_data[sprite_start] as usize;
-            let tile = self.oam_data[sprite_start + 1];
-            let attributes = self.oam_data[sprite_start + 2];
-            let tile_x = self.oam_data[sprite_start + 3] as usize;
-
-            let palette_idx = (attributes & 0b11) as usize;
-            let flip_h = attributes & 0b0100_0000 == 0b0100_0000;
-            let flip_v = attributes & 0b1000_0000 == 0b1000_0000;
-            let _priority = attributes & 0b0010_0000 == 0b0010_0000;
-
-            let tile_base = bank_base + (tile as usize) * 16;
-            let tile = &self.chr_rom[tile_base..(tile_base + 16)];
-            let sprites_palette = self.sprites_palette(palette_idx);
-
-            for y in 0..8usize {
-                let lo = tile[y];
-                let hi = tile[y + 8];
-
-                for x in 0..8usize {
-                    let hi = (hi >> (7 - x)) & 0x1;
-                    let lo = (lo >> (7 - x)) & 0x1;
-                    let color = ((hi) << 1) | lo;
-                    let rgb = if color == 0 { // 透明, 跳过绘制
-                        continue;
+    // -- sprite evaluation --
+    /// sprite evaluation 阶段是为下一行寻找 8 个 sprite 并放入 second oam 中, 发生在 65..=256 周期,
+    /// 奇数周期从 OAM 读一个字节, 偶数周期写到 second OAM 一个字节.
+    fn sprite_evaluation(&mut self) {
+        if self.cycle % 2 == 1 { // odd cycles, read
+            self.sprite_eval_tmp_data = self.oam_data[4 * self.sprite_eval_n + self.sprite_eval_m];
+        } else { // even cycles, write
+            if !self.sprite_eval_done { // OAM 未访问完全则继续
+                if self.second_oam_n < 8 { // 只有在 OAM 与 second OAM 都未访问完全才写
+                    self.second_oam[4 * self.second_oam_n + self.sprite_eval_m] = self.sprite_eval_tmp_data;
+                }                
+                if self.sprite_eval_m == 0 { // 新 sprite 第一个字节
+                    let y = self.sprite_eval_tmp_data as u16;
+                    let h = if self.controller.contains(ControllerRegister::SPRITE_SIZE) {
+                        16u16
                     } else {
-                        Self::SYSTEM_PALETTE[sprites_palette[color as usize] as usize]
+                        8u16
                     };
-                    match (flip_h, flip_v) { // 精灵的绘制精确到像素
-                        (false, false) => self.frame.set_pixel(tile_x + x, tile_y + y, rgb),
-                        (false, true) => self.frame.set_pixel(tile_x + x, tile_y + 7 - y, rgb),
-                        (true, false) => self.frame.set_pixel(tile_x + 7 - x, tile_y + y, rgb),
-                        (true, true) => self.frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y, rgb),
+                    if self.scanline >= y && self.scanline < y + h {
+                        self.sprite_eval_m = 1;
+                        if self.second_oam_n == 8 {
+                            self.status.insert(StatusRegister::SPRITE_OVERFLOW);
+                        }
+                    } else {
+                        self.sprite_eval_n += 1;
+                        // TODO 未实现 overflow bug
+                        // overflow bug 会导致把以后的的第二字节、第三字节、第四字节等当作 Y
+                        // if self.second_oam_n == 8 
+                        //     self.sprite_eval_m += 1;
+                        // }
                     }
-
+                } else {
+                    self.sprite_eval_m += 1;
+                }
+                if self.sprite_eval_m == 4 {
+                    self.sprite_eval_m = 0;
+                    self.sprite_eval_n += 1;
+                    if self.second_oam_n < 8 {
+                        self.second_oam_n += 1;
+                    }
+                }
+                if self.sprite_eval_n == 64 {
+                    self.sprite_eval_done = true;
+                    self.sprite_eval_n = 0;
                 }
             }
         }
     }
 
-    fn update_sprites_8_16(&mut self) {
-        todo!("8 * 16 size sprites not implement")
+    /// sprite fetch 阶段, 将 second OAM 中的 sprite 的数据获取并放入 current_sprites 数组, 共 64 个周期, 每个 sprite 占 8 个
+    fn sprite_fetch(&mut self) {
+        let n = (self.cycle as usize - 257) / 8; // 0..=7 表示第 n 个 sprite
+        let cycle = (self.cycle as usize - 257) % 8; // 0..=7 表示 sprite 的第 cycle 个周期
+        if n < self.second_oam_n {
+            match cycle {
+                0 => {
+                    self.current_sprites[n].y = self.second_oam[4 * n];
+                }
+                1 => {
+                    self.current_sprites[n].tile_index = self.second_oam[4 * n + 1];
+                }
+                2 => {
+                    self.current_sprites[n].attributes = self.second_oam[4 * n + 2];
+                }
+                3 => {
+                    self.current_sprites[n].x = self.second_oam[4 * n + 3];
+                }
+                4 => { // 4..=7 这四个周期用来 fetch tile data
+                    let tile_index = self.current_sprites[n].tile_index as usize;
+                    if !self.controller.contains(ControllerRegister::SPRITE_SIZE) { // 8x8 sprites
+                        let bank_base = if self.controller.contains(ControllerRegister::SPRITE_PATTERN_ADDR) {
+                            0x1000usize
+                        } else {
+                            0usize
+                        };
+                        for idx in 0..16usize {
+                            self.current_sprites[n].tile[idx] = self.chr_rom[bank_base + tile_index * 16 + idx];
+                        }
+                    } else {
+                        let bank_base = (tile_index & 0x1) * 0x1000;
+                        let tile_index = tile_index >> 1;
+                        for idx in 0..16usize {
+                            self.current_sprites[n].tile[idx] = self.chr_rom[bank_base + tile_index * 16 + idx];
+                        }
+                        for idx in 0..16usize {
+                            self.current_sprites[n].other_tile[idx] = self.chr_rom[bank_base + tile_index * 16 + 16 + idx];
+                        }
+                    }
+                }
+                _ => ()
+            }
+        } else if n == self.second_oam_n && cycle == 0{  // first empty sprite slot
+            self.current_sprites[n].y = self.oam_data[63 * 4]; // TODO 不确定这样实现是否正确
+        } else { // other empty slot
+            match cycle {
+                0 => {
+                    self.current_sprites[n].y = 0xff;
+                }
+                1 => {
+                    self.current_sprites[n].tile_index = 0xff;
+                }
+                2 => {
+                    self.current_sprites[n].attributes = 0xff;
+                }
+                3 => {
+                    self.current_sprites[n].x = 0xff;
+                }
+                _ => ()
+            }
+        }
+        
+    }
+
+    fn fetch_sprite_0(&self) -> Sprite {
+        let mut sprite_0 = Sprite::new();
+        sprite_0.y = self.oam_data[0];
+        sprite_0.tile_index = self.oam_data[1];
+        sprite_0.attributes = self.oam_data[2];
+        sprite_0.x = self.oam_data[3];
+        let tile_index = sprite_0.tile_index as usize;
+        if !self.controller.contains(ControllerRegister::SPRITE_SIZE) { // 8x8 sprites
+            let bank_base = if self.controller.contains(ControllerRegister::SPRITE_PATTERN_ADDR) {
+                0x1000usize
+            } else {
+                0usize
+            };
+            for idx in 0..16usize {
+                sprite_0.tile[idx] = self.chr_rom[bank_base + tile_index * 16 + idx];
+            }
+        } else {
+            let bank_base = (tile_index & 0x1) * 0x1000;
+            let tile_index = tile_index >> 1;
+            for idx in 0..16usize {
+                sprite_0.tile[idx] = self.chr_rom[bank_base + tile_index * 16 + idx];
+            }
+            for idx in 0..16usize {
+                sprite_0.other_tile[idx] = self.chr_rom[bank_base + tile_index * 16 + 16 + idx];
+            }
+        }
+        sprite_0            
     }
     
 }

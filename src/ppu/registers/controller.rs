@@ -45,7 +45,4 @@ impl ControllerRegister {
         }
     }
 
-    pub fn base_nametable_address(&self) -> u16 {
-        (self.bits & 0b11) as u16 * 0x0400 + 0x2000
-    }
 }
